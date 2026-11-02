@@ -33,6 +33,12 @@
   .msg.err { background:#fdecea; color:var(--err); }
   .msg.ok { background:#e6f4ea; color:#1e6b34; }
   .hidden { display:none; }
+  .loopRes { margin-top:10px; padding:10px 12px; border-radius:8px; font-size:15px; line-height:1.45; }
+  .loopRes.ok { background:#e6f4ea; color:#1e6b34; border:1px solid #b7dfc2; }
+  .loopRes.bad { background:#fdecea; color:#b3261e; border:1px solid #f3c2bd; }
+  .loopRes.warn { background:#fff4e0; color:#8a4b00; border:1px solid #f1d29c; }
+  .loopRes.na { background:#eef1f5; color:#3d4b5c; border:1px solid #d5dce4; }
+  .mgrLoop { font-size:14px; margin:10px 0 0; }
   .actionbar { position:sticky; bottom:0; display:flex; gap:10px; background:var(--bg); padding:10px 0 calc(10px + env(safe-area-inset-bottom)); border-top:1px solid var(--line); }
   .actionbar button { flex:1; min-height:48px; }
   button, select, input { touch-action:manipulation; }
@@ -227,7 +233,8 @@ function addRow(panel, vals){
     '<button type="button" class="secondary loopBtn" style="width:100%;margin-top:12px">⚡ הוספת תוצאת לולאת תקלה</button>' +
     '<div class="loopBox hidden"><h3>⚡ תוצאת לולאת תקלה (לא חובה)</h3>' +
     '<p class="sub" style="font-size:14px;margin:0 0 8px">הזן את התוצאות שנמדדו, בנקודה עשרונית. אפשר למלא רק חלק.</p>' +
-    '<div class="grid g4">' + fieldsHtml(DEFS.rowLoop) + '</div></div>';
+    '<div class="grid g4">' + fieldsHtml(DEFS.rowLoop) + '</div>' +
+    '<div class="loopRes hidden" role="status"></div></div>';
   d.querySelector('.rmRow').onclick = function(){
     if (confirm('למחוק את השדה?')) { d.remove(); renumRows(panel); save(); }
   };
@@ -311,6 +318,95 @@ function addPanel(vals){
   if (!d.querySelector('.rowcard')) addRow(d);
   return d;
 }
+/* ===== בדיקת לולאת תקלה — אותה לוגיקה כמו באפליקציית הבדיקות =====
+   זרם תקלה = 230V / ההתנגדות הגבוהה מבין ערכי L-PE (ערכי L-N לא נכנסים לבדיקה).
+   לוח מתכת: מול המפסק המזין (גודל + כיול מגנטי). לוח מבודד: מול המפסק הראשי (גודל + כיול I).
+   תקין אם זרם הניתוק המגנטי קטן מזרם התקלה. מפסק מגן כהגנה בלעדית — אין בדיקה. */
+var FL_RCD_ONLY = 'מפסק מגן כהגנה בלעדית';
+function flBreakerIn(s){
+  s = String(s || '').trim();
+  if (!s) return null;
+  var m = s.match(/(\d+)\s*[xX×*]\s*(\d+)/);
+  if (m) return parseInt(m[2], 10);
+  m = s.match(/^(\d+)\s*A\s*$/i);
+  if (m) return parseInt(m[1], 10);
+  m = s.match(/^(\d+)$/);
+  if (m) return parseInt(m[1], 10);
+  return null;
+}
+function flTripAmps(magRaw, inAmps){
+  var In = parseInt(inAmps, 10);
+  if (inAmps == null || isNaN(In) || In <= 0) return { tripAmps: null, reason: 'noIn' };
+  var s = String(magRaw == null ? '' : magRaw).trim().replace(/\s+/g, '');
+  if (!s) return { tripAmps: null, reason: 'noMag' };
+  var curveMult = { B: 5, C: 10, D: 20, K: 14, Z: 3 };
+  if (curveMult[s.toUpperCase()]) return { tripAmps: In * curveMult[s.toUpperCase()], reason: 'curve' };
+  var n = parseFloat(String(magRaw).replace(',', '.').trim());
+  if (isNaN(n)) return { tripAmps: null, reason: 'badMag' };
+  if (n > 15) return { tripAmps: n, reason: 'directA' };
+  if (n >= 1 && n <= 15) return { tripAmps: n * In, reason: 'mult' };
+  return { tripAmps: null, reason: 'magOutOfRules' };
+}
+function flOhms(v, unit){
+  var n = parseFloat(String(v == null ? '' : v).replace(',', '.').trim());
+  if (!isFinite(n) || n <= 0) return NaN;
+  return unit === 'mohm' ? n / 1000 : n;
+}
+/** תוצאת הבדיקה לשדה ראשי: null כשלא הוזנה לולאת תקלה; אחרת { state: ok|bad|warn|na, text } */
+function flEvalRow(row, pBase, protect){
+  var g = function(k){ var e = row.querySelector('[data-k=' + k + ']'); return e ? String(e.value || '').trim() : ''; };
+  var unit = /m/i.test(g('flUnit')) ? 'mohm' : 'ohm';
+  var zs = [];
+  ['flL1PE', 'flL2PE', 'flL3PE'].forEach(function(k){ var o = flOhms(g(k), unit); if (isFinite(o) && o > 0) zs.push(o); });
+  var hasN = ['flL1N', 'flL2N', 'flL3N'].some(function(k){ return g(k); });
+  if (!zs.length && !hasN) return null;
+  if (String(protect || '').trim() === FL_RCD_ONLY) return { state: 'na', text: 'ℹ הבדיקה מול המפסק לא נדרשת — שיטת ההגנה היא מפסק מגן כהגנה בלעדית.' };
+  if (!zs.length) return { state: 'warn', text: '⚠ לא ניתן לבדוק: הוזנו רק ערכי L-N. הבדיקה מול המפסק מתבצעת לפי ערכי L-PE.' };
+  var isMetal = String(pBase || '').trim() === 'מתכת';
+  var inAmps = flBreakerIn(isMetal ? g('pFeedAmp') : g('pMain'));
+  var magRaw = isMetal ? g('pMag') : g('pI');
+  var mr = flTripAmps(magRaw, inAmps);
+  var ik = parseFloat(((230 / Math.max.apply(null, zs)) / 1000).toFixed(2));
+  if (mr.tripAmps == null) {
+    var why;
+    if (inAmps == null) why = isMetal ? 'חסר או לא מזוהה «מפסק (גודל)» של המזין (בלוח מתכת הבדיקה היא מול המפסק המזין)' : 'חסר או לא מזוהה «מפסק ראשי של הלוח (גודל)»';
+    else if (mr.reason === 'noMag') why = isMetal ? 'חסר «כיול מגנטי» של המפסק המזין' : 'חסר «כיול I (מגנטי)» של המפסק הראשי';
+    else why = 'הכיול המגנטי «' + magRaw + '» לא מזוהה';
+    return { state: 'warn', text: '⚠ לא ניתן לבדוק: ' + why + '.' };
+  }
+  var ok = mr.tripAmps < ik * 1000;
+  return { state: ok ? 'ok' : 'bad', text: (ok ? '✅ לולאת התקלה תקינה' : '❌ לולאת התקלה לא תקינה') +
+    ': זרם התקלה המחושב ' + ik.toFixed(2) + ' kA, סף הניתוק המגנטי של המפסק ' + (mr.tripAmps / 1000).toFixed(2) + ' kA' +
+    (isMetal ? ' (לוח מתכת — מול המפסק המזין).' : ' (מול המפסק הראשי).') };
+}
+function flProtect(){ var e = $('siteScope').querySelector('[data-k=protectMethod]'); return e ? e.value : ''; }
+/** מעדכן את תוצאת הבדיקה בכל השדות בטופס */
+function refreshLoopChecks(){
+  var protect = flProtect();
+  panelEls().forEach(function(p){
+    var be = p.querySelector('[data-k=pBase]');
+    [].forEach.call(p.querySelectorAll('.rowcard'), function(row){
+      var box = row.querySelector('.loopRes');
+      if (!box) return;
+      var r = flEvalRow(row, be ? be.value : '', protect);
+      if (!r) { box.className = 'loopRes hidden'; box.textContent = ''; return; }
+      box.className = 'loopRes ' + r.state;
+      box.textContent = r.text;
+    });
+  });
+}
+/** שורת סיכום ללוח בחלון הלוחות */
+function panelLoopSummary(p){
+  var be = p.querySelector('[data-k=pBase]'), protect = flProtect();
+  var res = [].map.call(p.querySelectorAll('.rowcard'), function(row){ return flEvalRow(row, be ? be.value : '', protect); }).filter(Boolean);
+  if (!res.length) return '';
+  var has = function(s){ return res.some(function(r){ return r.state === s; }); };
+  if (has('bad')) return '<p class="mgrLoop" style="color:#b3261e">❌ לולאת תקלה: לא תקינה</p>';
+  if (has('warn')) return '<p class="mgrLoop" style="color:#8a4b00">⚠ לולאת תקלה: חסר נתון לבדיקה</p>';
+  if (has('ok')) return '<p class="mgrLoop" style="color:#1e6b34">✅ לולאת תקלה: תקינה</p>';
+  return '<p class="mgrLoop">ℹ לולאת תקלה: הבדיקה לא נדרשת</p>';
+}
+
 /* ===== ריכוז וניהול לוחות ===== */
 function panelEls(){ return [].slice.call($('panels').children); }
 function openMgr(){ renderMgr(); $('mgr').classList.remove('hidden'); document.body.style.overflow = 'hidden'; }
@@ -343,6 +439,7 @@ function renderMgr(){
             d.opts.map(function(o){ return '<option>' + esc(o) + '</option>'; }).join('') + '</select></div>';
         }).join('') +
       '</div>' +
+      panelLoopSummary(p) +
       '<div class="mgrBtns">' +
         '<button type="button" class="go">↗ מעבר ללוח</button>' +
         '<button type="button" class="secondary up"' + (i === 0 ? ' disabled' : '') + '>⬆ למעלה</button>' +
@@ -415,6 +512,7 @@ function save(){
   VER++; ST.dirty = true;
   STORAGE_OK = persist();
   updateStatus();
+  try { refreshLoopChecks(); } catch (eLc) {}
 }
 function restore(){
   var d = null;
@@ -430,6 +528,7 @@ function restore(){
   }
   if (d && d.panels && d.panels.length) d.panels.forEach(function(p){ addPanel(p); });
   else addPanel();
+  try { refreshLoopChecks(); } catch (eLc) {}
   try { localStorage.setItem(STORE + '_t', '1'); localStorage.removeItem(STORE + '_t'); STORAGE_OK = true; } catch(e){ STORAGE_OK = false; }
   updateStatus();
   if (ST.pending) send(true);
