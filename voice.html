@@ -95,6 +95,10 @@
   }
   function normalize(text) {
     var s = String(text || '').replace(/[,،;]/g, ' ').replace(/(\d)\s*[xX×*]\s*(\d)/g, '$1 x $2').replace(/(\d),(\d)/g, '$1.$2');
+    /* Chrome כותב לפעמים מספרים במקף ("שש-עשרה", "שישה־עשר") ומוסיף יחידות (ממ"ר, מ"מ, מילימטר) */
+    s = s.replace(/([א-ת])[-־–]([א-ת])/g, '$1 $2')
+      .replace(/(\d)\s*(?:ממ["״']?ר|מ["״']?מ|ממר|מילימטר(?:ים)?(?:\s*רבוע(?:ים)?)?|mm2?|ממ²)/gi, '$1 ')
+      .replace(/(^|\s)(?:ממ["״']?ר|מ["״']?מ|ממר|מילימטר(?:ים)?(?:\s*רבוע(?:ים)?)?|ממ²)(?=\s|$)/g, ' ');
     var toks = s.split(/\s+/).filter(Boolean), out = [], i = 0;
     while (i < toks.length) {
       var nw = numWord(toks[i]);
