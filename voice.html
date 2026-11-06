@@ -129,7 +129,11 @@
           var fw = numWord(toks[j]);
           if (!fw) break;
           if (frac && j + 1 < toks.length && /^(נקודה|פסיק)$/.test(toks[j + 1])) break;
-          if (fw.kind === 'digits') { frac += fw.raw.replace('.', ''); j++; break; }
+          if (fw.kind === 'digits') {
+            frac += fw.raw.replace('.', ''); j++;
+            if (fw.raw.length === 1 && j < toks.length && /^\d$/.test(toks[j]) && !(j + 1 < toks.length && /^(נקודה|פסיק)$/.test(toks[j + 1]))) continue;
+            break;
+          }
           if (fw.kind === 'unit' && fw.v < 10) { frac += String(fw.v); j++; continue; }
           if (fw.kind === 'tens') {
             var tv = fw.v; j++;
@@ -196,7 +200,22 @@
       }
       return m[1] + 'x' + m[2] + (sens ? '/' + sens : '');
     },
-    list: function (t) { return nums(t).join(' / '); }
+    list: function (t) { return nums(t).join(' / '); },
+    ohm: function (t) {
+      /* ערך יחיד של לולאת תקלה [Ω] — עמיד לשיבושים של Chrome: "0 35" / "035" / "350 מילי" → 0.35 */
+      var n = normalize(t), a = n.match(/\d+(?:\.\d+)?/g) || [];
+      if (!a.length) return '';
+      var v;
+      if (a.length >= 2 && a[0] === '0' && /^\d+$/.test(a[1])) v = '0.' + a[1];
+      else if (/^0\d+$/.test(a[0])) v = '0.' + a[0].slice(1);
+      else v = a[0];
+      /* "אפס שלושים וחמש" (בלי «נקודה») → 0.35 ; "נקודה ארבע" → 0.4 */
+      var lead = String(t).trim();
+      if (v.indexOf('.') === -1 && v !== '0' && /^(אפס|0)(\s|$)/.test(lead)) v = '0.' + v.replace(/^0+/, '');
+      else if (v.indexOf('.') === -1 && /^(נקודה|פסיק)(\s|$)/.test(lead)) v = '0.' + v;
+      if (/מילי|mΩ|מיליאוהם/i.test(t)) v = String(+(parseFloat(v) / 1000).toFixed(4));
+      return v;
+    }
   };
 
   // ---------- שלבים ----------
@@ -216,7 +235,12 @@
     { sec: 'main', key: 'pL', label: 'ראשי — כיול L (תרמי)', say: 'כיול תרמי של המפסק הראשי', ex: '100', type: 'calib' },
     { sec: 'main', key: 'pI', label: 'ראשי — כיול I (מגנטי)', say: 'כיול מגנטי של המפסק הראשי', ex: '1000 · 5.5', type: 'calib' },
     { sec: 'meas', key: 'VOLT', label: 'מתח L1N / L2N / L3N', say: 'המתחים: L1, L2, L3', ex: '230 231 229', type: 'list' },
-    { sec: 'meas', key: 'LOOP', label: 'לולאת תקלה [Ω]', say: 'ערכי לולאת התקלה, אחד אחרי השני', ex: 'אפס נקודה שלוש חמש, אפס נקודה ארבע, אפס נקודה שלוש שמונה, אפס נקודה ארבע אחת (עד 6 ערכים)', type: 'list' }
+    { sec: 'meas', key: 'LOOP1', label: 'לולאת תקלה — ערך 1 [Ω]', say: 'לולאת תקלה, ערך ראשון', ex: 'אפס נקודה שלוש חמש → 0.35', type: 'ohm' },
+    { sec: 'meas', key: 'LOOP2', label: 'לולאת תקלה — ערך 2 [Ω]', say: 'ערך שני, או סיים', ex: '0.4 · «סיים» אם אין עוד', type: 'ohm' },
+    { sec: 'meas', key: 'LOOP3', label: 'לולאת תקלה — ערך 3 [Ω]', say: 'ערך שלישי, או סיים', ex: '0.38 · «סיים» אם אין עוד', type: 'ohm' },
+    { sec: 'meas', key: 'LOOP4', label: 'לולאת תקלה — ערך 4 [Ω]', say: 'ערך רביעי, או סיים', ex: '0.41 · «סיים» אם אין עוד', type: 'ohm' },
+    { sec: 'meas', key: 'LOOP5', label: 'לולאת תקלה — ערך 5 [Ω]', say: 'ערך חמישי, או סיים', ex: '«סיים» אם אין עוד', type: 'ohm' },
+    { sec: 'meas', key: 'LOOP6', label: 'לולאת תקלה — ערך 6 [Ω]', say: 'ערך שישי, או סיים', ex: '«סיים» אם אין עוד', type: 'ohm' }
   ];
   var SEC_NAME = { feed: 'נתוני הזנה', main: 'מפסק ראשי של הלוח', meas: 'מדידות' };
   var values = {}, current = {}, idx = 0;
@@ -313,9 +337,10 @@
     $('bar').style.width = Math.round(idx / STEPS.length * 100) + '%';
     speak(st.say, function () { listen(); });
   }
-  function goNext() { saveCur(); if (idx >= STEPS.length - 1) showSummary(); else show(idx + 1); }
+  function loopEnds() { return /^LOOP/.test(STEPS[idx].key) && !$('value').value.trim(); }
+  function goNext() { var end = loopEnds(); saveCur(); if (end || idx >= STEPS.length - 1) showSummary(); else show(idx + 1); }
   function goBack() { saveCur(); show(idx - 1); }
-  function goSkip() { delete values[STEPS[idx].key]; $('value').value = ''; if (idx >= STEPS.length - 1) showSummary(); else show(idx + 1); }
+  function goSkip() { var isLoop = /^LOOP/.test(STEPS[idx].key); delete values[STEPS[idx].key]; $('value').value = ''; if (isLoop || idx >= STEPS.length - 1) showSummary(); else show(idx + 1); }
   $('mic').onclick = function () { if (listening) stopListen(); else listen(); };
   $('next').onclick = goNext;
   $('back').onclick = goBack;
@@ -343,6 +368,9 @@
     Array.prototype.forEach.call(document.querySelectorAll('#sumTable input'), function (inp) {
       var v = inp.value.trim(); if (v) out[inp.getAttribute('data-k')] = v;
     });
+    var loops = [];
+    for (var li = 1; li <= 6; li++) { if (out['LOOP' + li]) loops.push(out['LOOP' + li]); delete out['LOOP' + li]; }
+    if (loops.length) out.LOOP = loops.join(' ');
     if (!Object.keys(out).length) { $('sendState').textContent = 'לא הוזן אף ערך.'; return; }
     if (!window.opener) { $('sendState').textContent = 'הדף לא נפתח מהאפליקציה — חזור לאפליקציה ולחץ שם 🎤'; return; }
     try { window.opener.postMessage({ type: 'orgal-voice-fields', token: token, fields: out }, '*'); } catch (e) {}
@@ -355,6 +383,7 @@
     var d = ev.data || {};
     if (d.type !== 'orgal-voice-init' || d.token !== token) return;
     current = d.values || {};
+    if (current.LOOP) { String(current.LOOP).split(/\s*\/\s*/).slice(0, 6).forEach(function (v, i) { if (v) current['LOOP' + (i + 1)] = v; }); }
     if (d.title) $('prompt2').textContent = 'סיכום — ' + d.title;
     show(idx);
   });
