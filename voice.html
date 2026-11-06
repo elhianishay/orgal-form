@@ -52,7 +52,7 @@
     <button id="skip" type="button">דלג</button>
     <button id="next" type="button">הבא ←</button>
   </div>
-  <div id="hint">פקודות בקול: <b>הבא</b> / <b>כן</b> · <b>שוב</b> (הקלט מחדש) · <b>חזור</b> (לשדה הקודם) · <b>דלג</b> · <b>סיים</b> (לסיכום)<br>אפשר גם לתקן את הערך בהקלדה בשדה.</div>
+  <div id="hint">אחרי שערך נקלט עוברים לבד לשדה הבא.<br>פקודות בקול: <b>חזור</b> (לתקן את הקודם) · <b>דלג</b> (להשאיר) · <b>סיים</b> (לסיכום) · בסיכום: <b>שלח</b><br>אפשר גם לתקן בהקלדה ואז «הבא».</div>
 </div>
 
 <div id="summary">
@@ -67,7 +67,8 @@
 (function () {
   'use strict';
   // דף עצמאי מחוץ למסגרת של Google (שחוסמת מיקרופון). שואל שדה אחר שדה, מציג לאישור, ושולח לאפליקציה שפתחה אותו.
-  var token = (location.hash.match(/t=([A-Za-z0-9_-]+)/) || [])[1] || '';
+  var token = (location.search.match(/[?&]t=([A-Za-z0-9_-]+)/) || location.hash.match(/t=([A-Za-z0-9_-]+)/) || [])[1] || '';
+  var summaryMode = false, ackTimer = null;
   var $ = function (id) { return document.getElementById(id); };
 
   // ---------- מספרים בעברית → ספרות ----------
@@ -274,7 +275,7 @@
     rec = new SR();
     rec.lang = 'he-IL'; rec.interimResults = true; rec.continuous = false; rec.maxAlternatives = 1;
     var finalText = '', myRec = rec;
-    rec.onstart = function () { listening = true; $('mic').classList.add('on'); $('state').textContent = '🎙 מקשיב...'; };
+    rec.onstart = function () { listening = true; $('mic').classList.add('on'); $('state').textContent = '🎙 מקשיב...'; if (summaryMode) $('sendState').textContent = '🎙 מקשיב — אמור «שלח» או «חזור»'; };
     rec.onresult = function (ev) {
       var interim = '';
       for (var i = ev.resultIndex; i < ev.results.length; i++) {
@@ -299,6 +300,13 @@
   }
   function isCmd(t, re) { return re.test(t.trim()); }
   function onHeard(t) {
+    if (summaryMode) {
+      if (/שלח|אישור|כן|סיים|תכניס|הכנס/.test(t)) { sendNow(); return; }
+      if (/חזור|אחורה/.test(t)) { show(idx); return; }
+      $('sendState').textContent = 'לא הובן «' + t + '» — אמור «שלח» או לחץ על הכפתור';
+      listen();
+      return;
+    }
     if (isCmd(t, /^(הבא|כן|אישור|נכון|בסדר|אוקיי|אוקי)$/)) { goNext(); return; }
     if (isCmd(t, /^(שוב|לא|תקן|מחדש)$/)) { $('value').value = ''; $('state').textContent = 'הקלט מחדש...'; listen(); return; }
     if (isCmd(t, /^(חזור|אחורה|קודם)$/)) { goBack(); return; }
@@ -308,8 +316,14 @@
     var v = PARSE[st.type](t);
     $('value').value = v;
     if (v) {
-      $('state').textContent = '✔ נקלט: ' + v + ' — אמור «הבא» או «שוב»';
-      speak(String(v), function () { listen(); });
+      /* נקלט ערך → נשמר ועוברים לשדה הבא. טעות? אומרים «חזור» בשאלה הבאה */
+      $('state').textContent = '✔ נקלט: ' + v;
+      saveCur();
+      var myIdx = idx;
+      speak(String(v), function () {
+        if (summaryMode || idx !== myIdx) return;
+        if (idx >= STEPS.length - 1) showSummary(); else show(idx + 1);
+      });
     } else {
       $('state').textContent = '❓ לא זוהה ערך — נסה שוב';
       listen();
@@ -322,6 +336,7 @@
     if (v) values[STEPS[idx].key] = v; else delete values[STEPS[idx].key];
   }
   function show(i) {
+    summaryMode = false;
     idx = Math.max(0, Math.min(STEPS.length - 1, i));
     var st = STEPS[idx];
     $('wizard').style.display = ''; $('summary').style.display = 'none';
@@ -360,10 +375,14 @@
         '</td><td><input data-k="' + st.key + '" value="' + esc(values[st.key] || '') + '" placeholder="לא ישתנה"></td></tr>';
     });
     $('sumTable').innerHTML = html;
-    speak('סיכום. בדוק ושלח', null);
+    summaryMode = true;
+    $('sendState').textContent = '';
+    speak('סיכום. אמור שלח כדי להכניס לאפליקציה, או חזור', function () { if (summaryMode) listen(); });
   }
   $('sumBack').onclick = function () { show(idx); };
-  $('send').onclick = function () {
+  $('send').onclick = function () { sendNow(); };
+  function sendNow() {
+    stopListen();
     var out = {};
     Array.prototype.forEach.call(document.querySelectorAll('#sumTable input'), function (inp) {
       var v = inp.value.trim(); if (v) out[inp.getAttribute('data-k')] = v;
@@ -374,13 +393,24 @@
     if (!Object.keys(out).length) { $('sendState').textContent = 'לא הוזן אף ערך.'; return; }
     if (!window.opener) { $('sendState').textContent = 'הדף לא נפתח מהאפליקציה — חזור לאפליקציה ולחץ שם 🎤'; return; }
     try { window.opener.postMessage({ type: 'orgal-voice-fields', token: token, fields: out }, '*'); } catch (e) {}
-    $('sendState').textContent = '✅ נשלח לאפליקציה';
-    setTimeout(function () { try { window.close(); } catch (e) {} }, 700);
-  };
+    $('sendState').textContent = '⏳ שולח לאפליקציה...';
+    if (ackTimer) clearTimeout(ackTimer);
+    ackTimer = setTimeout(function () {
+      $('sendState').textContent = '⚠ האפליקציה לא אישרה קבלה. חזור לטאב של האפליקציה (שממנו לחצת 🎤) — אם השדות ריקים, חזור לכאן ולחץ «שלח» שוב.';
+    }, 3500);
+  }
 
   // ---------- חיבור לאפליקציה: ערכים קיימים בשורה ----------
   window.addEventListener('message', function (ev) {
     var d = ev.data || {};
+    if (d.type === 'orgal-voice-ack' && d.token === token) {
+      if (ackTimer) { clearTimeout(ackTimer); ackTimer = null; }
+      if (d.count < 0) { $('sendState').textContent = '⚠ החלון הזה כבר לא מקושר לאפליקציה — סגור אותו ולחץ שוב 🎤 באפליקציה.'; return; }
+      $('sendState').textContent = '✅ נקלט באפליקציה — ' + d.count + ' שדות';
+      speak('נקלט', null);
+      setTimeout(function () { try { window.close(); } catch (e) {} }, 1200);
+      return;
+    }
     if (d.type !== 'orgal-voice-init' || d.token !== token) return;
     current = d.values || {};
     if (current.LOOP) { String(current.LOOP).split(/\s*\/\s*/).slice(0, 6).forEach(function (v, i) { if (v) current['LOOP' + (i + 1)] = v; }); }
