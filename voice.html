@@ -5,70 +5,361 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>הקראה קולית — אורגל</title>
 <style>
-  body { font-family: Arial, sans-serif; margin: 0; padding: 16px; background: #f7f7f9; color: #222; text-align: center; }
-  h1 { font-size: 20px; margin: 8px 0 16px; }
-  #mic { width: 150px; height: 150px; border-radius: 50%; border: none; font-size: 64px; background: #dc3545; color: #fff; box-shadow: 0 4px 14px rgba(0,0,0,.25); }
+  body { font-family: Arial, sans-serif; margin: 0; padding: 12px; background: #f7f7f9; color: #222; }
+  .top { display: flex; justify-content: space-between; align-items: center; }
+  h1 { font-size: 18px; margin: 4px 0; }
+  .sec { font-size: 14px; color: #fff; display: inline-block; padding: 3px 10px; border-radius: 12px; margin: 8px 0 4px; }
+  .sec-feed { background: #0d6efd; } .sec-main { background: #6f42c1; } .sec-meas { background: #198754; }
+  #prompt { font-size: 24px; font-weight: bold; margin: 6px 0; }
+  #example { font-size: 14px; color: #666; }
+  #cur { font-size: 14px; color: #555; margin-top: 4px; }
+  #valueBox { margin: 12px 0; }
+  #value { width: 100%; box-sizing: border-box; font-size: 26px; padding: 10px; border: 2px solid #ccc; border-radius: 8px; text-align: center; }
+  #heard { font-size: 14px; color: #888; min-height: 18px; }
+  #state { font-size: 17px; font-weight: bold; margin: 8px 0; min-height: 22px; }
+  .row { display: flex; gap: 8px; flex-wrap: wrap; }
+  .row button { flex: 1 1 30%; padding: 14px 6px; font-size: 17px; border-radius: 10px; border: 1px solid #999; background: #fff; }
+  #mic { flex: 1 1 100%; background: #dc3545; color: #fff; border: none; font-size: 22px; }
   #mic.on { animation: pulse 1.1s infinite; }
-  @keyframes pulse { 0% { box-shadow: 0 0 0 0 rgba(220,53,69,.6); } 100% { box-shadow: 0 0 0 28px rgba(220,53,69,0); } }
-  #state { font-size: 18px; font-weight: bold; margin: 18px 0 8px; }
-  #heard { font-size: 17px; min-height: 48px; background: #fff; border: 1px solid #ddd; border-radius: 8px; padding: 10px; }
-  #hint { font-size: 13px; color: #777; margin-top: 14px; line-height: 1.6; }
-  button.sec { margin-top: 14px; padding: 10px 18px; font-size: 16px; border-radius: 8px; border: 1px solid #999; background: #fff; }
+  #next { background: #198754; color: #fff; border: none; }
+  @keyframes pulse { 0% { box-shadow: 0 0 0 0 rgba(220,53,69,.6); } 100% { box-shadow: 0 0 0 18px rgba(220,53,69,0); } }
+  #progress { height: 6px; background: #ddd; border-radius: 3px; margin: 8px 0; }
+  #bar { height: 6px; background: #0d6efd; border-radius: 3px; width: 0; }
+  #hint { font-size: 13px; color: #777; margin-top: 10px; line-height: 1.6; }
+  table { width: 100%; border-collapse: collapse; margin-top: 8px; }
+  td { border-bottom: 1px solid #ddd; padding: 6px 4px; font-size: 15px; }
+  td input { width: 100%; box-sizing: border-box; font-size: 16px; padding: 6px; }
+  .grp td { background: #eef; font-weight: bold; }
+  #summary { display: none; }
+  #send { width: 100%; margin-top: 12px; padding: 16px; font-size: 20px; border-radius: 10px; border: none; background: #198754; color: #fff; }
+  #mute { padding: 6px 10px; font-size: 18px; border-radius: 8px; border: 1px solid #aaa; background: #fff; }
 </style>
 </head>
 <body>
-<h1>🎤 הקראה לשורת מזין</h1>
-<button id="mic" type="button" aria-label="התחל הקראה">🎤</button>
-<div id="state">לחץ על המיקרופון ודבר</div>
-<div id="heard"></div>
-<button id="back" class="sec" type="button" style="display:none">חזרה לאפליקציה</button>
-<div id="hint">מזין 3 על 63 · תרמי 63 · מגנטי 630 · מעגל Q12 · לולאה 0.35 · מתח 230 · מתכת / מבדד · מוזן מהלוח הראשי · ראשי 3 על 100</div>
+<div class="top"><h1>🎤 הקראה מודרכת</h1><button id="mute" type="button" title="הקראת השאלות בקול">🔈</button></div>
+<div id="progress"><div id="bar"></div></div>
+
+<div id="wizard">
+  <span id="secTag" class="sec sec-feed">נתוני הזנה</span>
+  <div id="prompt"></div>
+  <div id="example"></div>
+  <div id="cur"></div>
+  <div id="valueBox"><input id="value" type="text" autocomplete="off"><div id="heard"></div></div>
+  <div id="state"></div>
+  <div class="row">
+    <button id="mic" type="button">🎤 דבר</button>
+    <button id="back" type="button">→ חזור</button>
+    <button id="skip" type="button">דלג</button>
+    <button id="next" type="button">הבא ←</button>
+  </div>
+  <div id="hint">פקודות בקול: <b>הבא</b> / <b>כן</b> · <b>שוב</b> (הקלט מחדש) · <b>חזור</b> (לשדה הקודם) · <b>דלג</b> · <b>סיים</b> (לסיכום)<br>אפשר גם לתקן את הערך בהקלדה בשדה.</div>
+</div>
+
+<div id="summary">
+  <div id="prompt2" style="font-size:20px;font-weight:bold;margin:6px 0">סיכום — בדוק ותקן לפני השליחה</div>
+  <table id="sumTable"></table>
+  <button id="send" type="button">✅ שלח לאפליקציה</button>
+  <div class="row" style="margin-top:8px"><button id="sumBack" type="button">→ חזור לשאלות</button></div>
+  <div id="sendState" style="margin-top:8px;font-weight:bold"></div>
+</div>
+
 <script>
 (function () {
-  // דף עצמאי מחוץ למסגרת של Google (שחוסמת מיקרופון). מקשיב, שולח את הטקסט לאפליקציה שפתחה אותו, ונסגר.
+  'use strict';
+  // דף עצמאי מחוץ למסגרת של Google (שחוסמת מיקרופון). שואל שדה אחר שדה, מציג לאישור, ושולח לאפליקציה שפתחה אותו.
   var token = (location.hash.match(/t=([A-Za-z0-9_-]+)/) || [])[1] || '';
-  var mic = document.getElementById('mic'), st = document.getElementById('state'), heard = document.getElementById('heard'), back = document.getElementById('back');
-  var SR = window.SpeechRecognition || window.webkitSpeechRecognition;
-  if (!SR) { st.textContent = 'הדפדפן לא תומך בזיהוי דיבור — פתח ב-Chrome'; mic.disabled = true; return; }
-  var rec = null, busy = false;
-  function send(text) {
-    if (window.opener) {
-      try { window.opener.postMessage({ type: 'orgal-voice', token: token, text: text }, '*'); } catch (e) {}
-      st.textContent = '✅ נשלח לאפליקציה';
-      setTimeout(function () { try { window.close(); } catch (e) {} back.style.display = 'inline-block'; }, 700);
-    } else {
-      st.textContent = 'הדף לא נפתח מהאפליקציה — חזור לאפליקציה ולחץ שם 🎤';
+  var $ = function (id) { return document.getElementById(id); };
+
+  // ---------- מספרים בעברית → ספרות ----------
+  var UNITS = { 'אפס': 0, 'אחד': 1, 'אחת': 1, 'שתיים': 2, 'שתים': 2, 'שניים': 2, 'שנים': 2, 'שני': 2, 'שתי': 2,
+    'שלוש': 3, 'שלושה': 3, 'שלושת': 3, 'ארבע': 4, 'ארבעה': 4, 'ארבעת': 4, 'חמש': 5, 'חמישה': 5, 'חמשת': 5,
+    'שש': 6, 'שישה': 6, 'ששה': 6, 'ששת': 6, 'שבע': 7, 'שבעה': 7, 'שבעת': 7, 'שמונה': 8, 'שמונת': 8,
+    'תשע': 9, 'תשעה': 9, 'תשעת': 9, 'עשר': 10, 'עשרה': 10, 'עשרת': 10 };
+  var TENS = { 'עשרים': 20, 'שלושים': 30, 'ארבעים': 40, 'חמישים': 50, 'שישים': 60, 'שבעים': 70, 'שמונים': 80, 'תשעים': 90 };
+  function numWord(w) {
+    var t = String(w || ''), tries = [t];
+    if (t.length > 1 && t.charAt(0) === 'ו') tries.push(t.slice(1));
+    for (var i = 0; i < tries.length; i++) {
+      var x = tries[i];
+      if (UNITS.hasOwnProperty(x)) return { v: UNITS[x], kind: 'unit' };
+      if (TENS.hasOwnProperty(x)) return { v: TENS[x], kind: 'tens' };
+      if (x === 'מאה') return { v: 100, kind: 'hundred' };
+      if (x === 'מאתיים') return { v: 200, kind: 'hundreds' };
+      if (x === 'מאות') return { v: 100, kind: 'mulHundred' };
+      if (x === 'אלף' || x === 'אלפים') return { v: 1000, kind: 'mulThousand' };
+      if (x === 'אלפיים') return { v: 2000, kind: 'thousands' };
+      if (x === 'חצי') return { v: 0.5, kind: 'half' };
+      if (/^\d+(\.\d+)?$/.test(x)) return { v: parseFloat(x), kind: 'digits', raw: x };
     }
+    return null;
   }
-  back.onclick = function () { try { window.close(); } catch (e) {} };
-  function start() {
-    if (busy) { try { rec.stop(); } catch (e) {} return; }
+  function normalize(text) {
+    var s = String(text || '').replace(/[,،;]/g, ' ').replace(/(\d)\s*[xX×*]\s*(\d)/g, '$1 x $2').replace(/(\d),(\d)/g, '$1.$2');
+    var toks = s.split(/\s+/).filter(Boolean), out = [], i = 0;
+    while (i < toks.length) {
+      var nw = numWord(toks[i]);
+      if (!nw || nw.kind === 'half' || nw.kind === 'mulHundred') { out.push(toks[i]); i++; continue; }
+      var total = 0, cur = 0, raw = null, used = 0;
+      while (i < toks.length) {
+        var w = numWord(toks[i]);
+        if (!w) break;
+        if (w.kind === 'digits') { if (used) break; raw = w.raw; cur = w.v; i++; used++; continue; }
+        if (raw !== null) break;
+        if (w.kind === 'unit') {
+          if (w.v === 10 && cur > 0 && cur < 10) cur += 10;
+          else if (cur % 10 === 0 || cur >= 100 || cur === 0) { if (cur > 0 && cur < 10) break; cur += w.v; }
+          else break;
+        } else if (w.kind === 'tens') { if (cur % 100 !== 0 && cur > 0) break; cur += w.v; }
+        else if (w.kind === 'hundred' || w.kind === 'hundreds') { if (cur >= 100) break; cur += w.v; }
+        else if (w.kind === 'mulHundred') { if (cur > 0 && cur < 10) cur = cur * 100; else break; }
+        else if (w.kind === 'thousands') { total += w.v; }
+        else if (w.kind === 'mulThousand') { total += (cur || 1) * 1000; cur = 0; }
+        else if (w.kind === 'half') { cur += 0.5; i++; used++; break; }
+        i++; used++;
+      }
+      var num = raw !== null ? parseFloat(raw) : total + cur;
+      var numStr = raw !== null ? raw : String(num);
+      if (i < toks.length && /^(נקודה|פסיק)$/.test(toks[i])) {
+        var j = i + 1, frac = '';
+        while (j < toks.length) {
+          var fw = numWord(toks[j]);
+          if (!fw) break;
+          if (frac && j + 1 < toks.length && /^(נקודה|פסיק)$/.test(toks[j + 1])) break;
+          if (fw.kind === 'digits') { frac += fw.raw.replace('.', ''); j++; break; }
+          if (fw.kind === 'unit' && fw.v < 10) { frac += String(fw.v); j++; continue; }
+          if (fw.kind === 'tens') {
+            var tv = fw.v; j++;
+            var nx = j < toks.length ? numWord(toks[j]) : null;
+            if (nx && nx.kind === 'unit' && nx.v < 10) { tv += nx.v; j++; }
+            frac += String(tv); break;
+          }
+          break;
+        }
+        if (frac) { numStr = String(Math.floor(num)) + '.' + frac; i = j; }
+      }
+      out.push(numStr);
+    }
+    return out.join(' ').replace(/(\d)\s+(?:על|איקס|x|X|כפול|×)\s+(\d)/g, '$1x$2');
+  }
+  function nums(t) { return (normalize(t).match(/\d+(?:\.\d+)?/g) || []); }
+
+  // ---------- פענוח לפי סוג השדה ----------
+  var PARSE = {
+    size: function (t) { var n = normalize(t), m = n.match(/(\d+)x(\d+(?:\.\d+)?)/); if (m) return m[1] + 'x' + m[2]; var a = nums(t); return a.length ? a[0] : ''; },
+    calib: function (t) {
+      var n = normalize(t).trim(), up = n.toUpperCase();
+      var cm = { 'C': 'C', 'סי': 'C', 'B': 'B', 'בי': 'B', 'D': 'D', 'די': 'D', 'K': 'K', 'קיי': 'K', 'Z': 'Z', 'זד': 'Z' };
+      var parts = up.split(/\s+/);
+      for (var i = 0; i < parts.length; i++) if (cm[parts[i]]) return cm[parts[i]];
+      for (var k in cm) if (n.indexOf(k) !== -1 && /[א-ת]/.test(k)) return cm[k];
+      var a = nums(t); return a.length ? a[0] : '';
+    },
+    text: function (t) {
+      /* אותיות לטיניות שנאמרות בעברית: "קיו אי 101" → QE101 */
+      var LET = { 'קיו': 'Q', 'קיוּ': 'Q', 'אף': 'F', 'אפ': 'F', 'אי': 'E', 'בי': 'B', 'סי': 'C', 'די': 'D', 'אל': 'L', 'אם': 'M',
+        'טי': 'T', 'אס': 'S', 'פי': 'P', 'איקס': 'X', 'וי': 'V', 'ג׳י': 'G', "ג'י": 'G', 'אייץ׳': 'H', 'קיי': 'K', 'אן': 'N', 'אר': 'R', 'יו': 'U', 'וואי': 'Y' };
+      return normalize(t).split(/\s+/).map(function (w) { return LET[w] || w; }).join('').toUpperCase();
+    },
+    conn: function (t) {
+      if (/ראשי/.test(t)) return 'ללוח הראשי';
+      if (/רשת|חברת החשמל/.test(t)) return 'לרשת החשמל';
+      if (/גנרטור/.test(t)) return 'לגנרטור';
+      if (/מעלית/.test(t)) return 'מלוח מעלית';
+      if (/קיים/.test(t)) return 'ללוח קיים';
+      return t.trim();
+    },
+    base: function (t) { if (/מתכת/.test(t)) return 'מתכת'; if (/מבדד|מבודד|פלסטיק|בידוד/.test(t)) return 'מבדד'; return ''; },
+    num: function (t) { var a = nums(t); return a.length ? a[0] : ''; },
+    free: function (t) { return normalize(t).replace(/\s+/g, ' ').trim(); },
+    ftype: function (t) {
+      if (/בלתי|ב\.? ?חיוני|בחיוני/.test(t)) return 'ב.חיוני';
+      if (/חיוני/.test(t)) return 'חיוני';
+      if (/אל.?פסק|UPS|יו פי אס/i.test(t)) return 'אל-פסק';
+      if (/חירום/.test(t)) return 'חירום';
+      if (/רגיל/.test(t)) return 'רגיל';
+      return t.trim();
+    },
+    rcd: function (t) {
+      /* "4 על 40 30 מיליאמפר" / "4 על 40 אפס נקודה אפס שלוש" → 4x40/0.03A */
+      var n = normalize(t), m = n.match(/(\d+)x(\d+)/);
+      if (!m) return '';
+      var rest = n.slice(n.indexOf(m[0]) + m[0].length), sens = '';
+      var a = rest.match(/\d+(?:\.\d+)?/g) || [];
+      if (a.length) {
+        var v = parseFloat(a[0]);
+        if (v >= 1) v = v / 1000;            /* 30 / 300 מיליאמפר */
+        sens = String(+v.toFixed(3)) + 'A';
+      }
+      return m[1] + 'x' + m[2] + (sens ? '/' + sens : '');
+    },
+    list: function (t) { return nums(t).join(' / '); }
+  };
+
+  // ---------- שלבים ----------
+  var STEPS = [
+    { sec: 'feed', key: 'pName', label: 'שם הלוח', say: 'שם הלוח', ex: 'לוח ראשי · לוח קומה 2', type: 'free' },
+    { sec: 'feed', key: 'pFieldType', label: 'שם השדה', say: 'שם השדה: רגיל, חיוני, בלתי חיוני, אל פסק או חירום', ex: 'רגיל · חיוני · ב.חיוני · אל-פסק · חירום', type: 'ftype' },
+    { sec: 'feed', key: 'pBase', label: 'סוג הלוח', say: 'סוג הלוח: מתכת או מבדד?', ex: 'מתכת / מבדד', type: 'base' },
+    { sec: 'feed', key: 'pConn', label: 'מוזן מ', say: 'מאיפה מוזן הלוח?', ex: 'מהלוח הראשי · מהרשת · מגנרטור · מלוח קיים · מלוח מעלית', type: 'conn' },
+    { sec: 'feed', key: 'pFeed', label: 'מספר מעגל מזין', say: 'מספר המעגל המזין', ex: 'Q12 · QE101', type: 'text' },
+    { sec: 'feed', key: 'pFeedAmp', label: 'גודל מפסק מזין', say: 'גודל המפסק המזין', ex: '3 על 63', type: 'size' },
+    { sec: 'feed', key: 'pTherm', label: 'מזין — כיול תרמי', say: 'כיול תרמי של המפסק המזין', ex: '63 · C', type: 'calib' },
+    { sec: 'feed', key: 'pMag', label: 'מזין — כיול מגנטי', say: 'כיול מגנטי של המפסק המזין', ex: '630 · 5.5 · C', type: 'calib' },
+    { sec: 'feed', key: 'pRcd', label: 'מפסק מגן', say: 'מפסק המגן: גודל ורגישות', ex: '4 על 40 30 מיליאמפר → 4x40/0.03A', type: 'rcd' },
+    { sec: 'feed', key: 'pCable', label: 'כבל הזנה', say: 'כבל ההזנה', ex: '5 על 16', type: 'size' },
+    { sec: 'feed', key: 'pEarth', label: 'הארקה — שטח חתך', say: 'שטח החתך של ההארקה', ex: '16', type: 'num' },
+    { sec: 'main', key: 'pMain', label: 'גודל מפסק ראשי', say: 'גודל המפסק הראשי של הלוח', ex: '3 על 100', type: 'size' },
+    { sec: 'main', key: 'pL', label: 'ראשי — כיול L (תרמי)', say: 'כיול תרמי של המפסק הראשי', ex: '100', type: 'calib' },
+    { sec: 'main', key: 'pI', label: 'ראשי — כיול I (מגנטי)', say: 'כיול מגנטי של המפסק הראשי', ex: '1000 · 5.5', type: 'calib' },
+    { sec: 'meas', key: 'VOLT', label: 'מתח L1N / L2N / L3N', say: 'המתחים: L1, L2, L3', ex: '230 231 229', type: 'list' },
+    { sec: 'meas', key: 'LOOP', label: 'לולאת תקלה [Ω]', say: 'ערכי לולאת התקלה, אחד אחרי השני', ex: 'אפס נקודה שלוש חמש, אפס נקודה ארבע, אפס נקודה שלוש שמונה, אפס נקודה ארבע אחת (עד 6 ערכים)', type: 'list' }
+  ];
+  var SEC_NAME = { feed: 'נתוני הזנה', main: 'מפסק ראשי של הלוח', meas: 'מדידות' };
+  var values = {}, current = {}, idx = 0;
+
+  // ---------- דיבור (שאלות בקול) ----------
+  var muted = false;
+  try { muted = localStorage.getItem('orgalVoiceMute') === '1'; } catch (e) {}
+  function paintMute() { $('mute').textContent = muted ? '🔇' : '🔈'; }
+  paintMute();
+  $('mute').onclick = function () { muted = !muted; try { localStorage.setItem('orgalVoiceMute', muted ? '1' : '0'); } catch (e) {} paintMute(); };
+  function speak(text, then) {
+    if (muted || !window.speechSynthesis) { then && then(); return; }
+    try {
+      speechSynthesis.cancel();
+      var u = new SpeechSynthesisUtterance(text);
+      u.lang = 'he-IL'; u.rate = 1.05;
+      var done = false, fin = function () { if (!done) { done = true; then && then(); } };
+      u.onend = fin; u.onerror = fin;
+      setTimeout(fin, 4500);
+      speechSynthesis.speak(u);
+    } catch (e) { then && then(); }
+  }
+
+  // ---------- זיהוי דיבור ----------
+  var SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+  var rec = null, listening = false;
+  function stopListen() { try { if (rec) rec.abort(); } catch (e) {} listening = false; $('mic').classList.remove('on'); }
+  function listen() {
+    if (!SR) { $('state').textContent = 'הדפדפן לא תומך בזיהוי דיבור — פתח ב-Chrome'; return; }
+    stopListen();
     rec = new SR();
     rec.lang = 'he-IL'; rec.interimResults = true; rec.continuous = false; rec.maxAlternatives = 1;
-    var finalText = '';
-    rec.onstart = function () { busy = true; mic.classList.add('on'); st.textContent = '🎙 מקשיב... דבר עכשיו'; heard.textContent = ''; };
+    var finalText = '', myRec = rec;
+    rec.onstart = function () { listening = true; $('mic').classList.add('on'); $('state').textContent = '🎙 מקשיב...'; };
     rec.onresult = function (ev) {
       var interim = '';
       for (var i = ev.resultIndex; i < ev.results.length; i++) {
         if (ev.results[i].isFinal) finalText += ev.results[i][0].transcript + ' ';
         else interim += ev.results[i][0].transcript;
       }
-      heard.textContent = (finalText + interim).trim();
+      $('heard').textContent = (finalText + interim).trim();
     };
     rec.onerror = function (ev) {
       var e = ev && ev.error;
-      st.textContent = (e === 'not-allowed' || e === 'service-not-allowed') ? '⛔ אין הרשאה למיקרופון — אשר מיקרופון לאתר הזה (סמל המנעול בשורת הכתובת)'
-        : (e === 'no-speech' ? '🤫 לא נשמע דיבור — לחץ שוב על המיקרופון' : '⚠ שגיאה: ' + e);
+      if (e === 'aborted') return;
+      $('state').textContent = (e === 'not-allowed' || e === 'service-not-allowed') ? '⛔ אין הרשאה למיקרופון לאתר הזה'
+        : (e === 'no-speech' ? '🤫 לא נשמע — לחץ «דבר»' : '⚠ ' + e);
     };
     rec.onend = function () {
-      busy = false; mic.classList.remove('on');
+      if (rec !== myRec) return;
+      listening = false; $('mic').classList.remove('on');
       var t = finalText.trim();
-      if (t) send(t);
+      if (t) onHeard(t);
     };
-    try { rec.start(); } catch (e) { st.textContent = '⚠ ' + e.message; }
+    try { rec.start(); } catch (e) { $('state').textContent = '⚠ ' + e.message; }
   }
-  mic.onclick = start;
-  start(); /* מנסה להתחיל מיד; אם הדפדפן דורש לחיצה — לוחצים על המיקרופון */
+  function isCmd(t, re) { return re.test(t.trim()); }
+  function onHeard(t) {
+    if (isCmd(t, /^(הבא|כן|אישור|נכון|בסדר|אוקיי|אוקי)$/)) { goNext(); return; }
+    if (isCmd(t, /^(שוב|לא|תקן|מחדש)$/)) { $('value').value = ''; $('state').textContent = 'הקלט מחדש...'; listen(); return; }
+    if (isCmd(t, /^(חזור|אחורה|קודם)$/)) { goBack(); return; }
+    if (isCmd(t, /^(דלג|הלאה|אין)$/)) { goSkip(); return; }
+    if (isCmd(t, /^(סיים|סיום|סיכום|זהו)$/)) { saveCur(); showSummary(); return; }
+    var st = STEPS[idx];
+    var v = PARSE[st.type](t);
+    $('value').value = v;
+    if (v) {
+      $('state').textContent = '✔ נקלט: ' + v + ' — אמור «הבא» או «שוב»';
+      speak(String(v), function () { listen(); });
+    } else {
+      $('state').textContent = '❓ לא זוהה ערך — נסה שוב';
+      listen();
+    }
+  }
+
+  // ---------- ניווט ----------
+  function saveCur() {
+    var v = $('value').value.trim();
+    if (v) values[STEPS[idx].key] = v; else delete values[STEPS[idx].key];
+  }
+  function show(i) {
+    idx = Math.max(0, Math.min(STEPS.length - 1, i));
+    var st = STEPS[idx];
+    $('wizard').style.display = ''; $('summary').style.display = 'none';
+    $('secTag').textContent = SEC_NAME[st.sec];
+    $('secTag').className = 'sec sec-' + st.sec;
+    $('prompt').textContent = (idx + 1) + '/' + STEPS.length + ' · ' + st.label;
+    $('example').textContent = 'לדוגמה: ' + st.ex;
+    var c = current[st.key];
+    $('cur').textContent = c ? 'כרגע באפליקציה: ' + c + ' (דלג כדי להשאיר)' : '';
+    $('value').value = values[st.key] || '';
+    $('heard').textContent = '';
+    $('state').textContent = '';
+    $('bar').style.width = Math.round(idx / STEPS.length * 100) + '%';
+    speak(st.say, function () { listen(); });
+  }
+  function goNext() { saveCur(); if (idx >= STEPS.length - 1) showSummary(); else show(idx + 1); }
+  function goBack() { saveCur(); show(idx - 1); }
+  function goSkip() { delete values[STEPS[idx].key]; $('value').value = ''; if (idx >= STEPS.length - 1) showSummary(); else show(idx + 1); }
+  $('mic').onclick = function () { if (listening) stopListen(); else listen(); };
+  $('next').onclick = goNext;
+  $('back').onclick = goBack;
+  $('skip').onclick = goSkip;
+  $('value').addEventListener('focus', stopListen);
+
+  function esc(s) { return String(s == null ? '' : s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/"/g, '&quot;'); }
+  function showSummary() {
+    stopListen();
+    try { speechSynthesis.cancel(); } catch (e) {}
+    $('wizard').style.display = 'none'; $('summary').style.display = '';
+    $('bar').style.width = '100%';
+    var html = '', lastSec = '';
+    STEPS.forEach(function (st, i) {
+      if (st.sec !== lastSec) { html += '<tr class="grp"><td colspan="2">' + SEC_NAME[st.sec] + '</td></tr>'; lastSec = st.sec; }
+      html += '<tr><td style="width:45%">' + esc(st.label) + (current[st.key] ? '<div style="font-size:12px;color:#888">כרגע: ' + esc(current[st.key]) + '</div>' : '') +
+        '</td><td><input data-k="' + st.key + '" value="' + esc(values[st.key] || '') + '" placeholder="לא ישתנה"></td></tr>';
+    });
+    $('sumTable').innerHTML = html;
+    speak('סיכום. בדוק ושלח', null);
+  }
+  $('sumBack').onclick = function () { show(idx); };
+  $('send').onclick = function () {
+    var out = {};
+    Array.prototype.forEach.call(document.querySelectorAll('#sumTable input'), function (inp) {
+      var v = inp.value.trim(); if (v) out[inp.getAttribute('data-k')] = v;
+    });
+    if (!Object.keys(out).length) { $('sendState').textContent = 'לא הוזן אף ערך.'; return; }
+    if (!window.opener) { $('sendState').textContent = 'הדף לא נפתח מהאפליקציה — חזור לאפליקציה ולחץ שם 🎤'; return; }
+    try { window.opener.postMessage({ type: 'orgal-voice-fields', token: token, fields: out }, '*'); } catch (e) {}
+    $('sendState').textContent = '✅ נשלח לאפליקציה';
+    setTimeout(function () { try { window.close(); } catch (e) {} }, 700);
+  };
+
+  // ---------- חיבור לאפליקציה: ערכים קיימים בשורה ----------
+  window.addEventListener('message', function (ev) {
+    var d = ev.data || {};
+    if (d.type !== 'orgal-voice-init' || d.token !== token) return;
+    current = d.values || {};
+    if (d.title) $('prompt2').textContent = 'סיכום — ' + d.title;
+    show(idx);
+  });
+  if (window.opener) {
+    try { window.opener.postMessage({ type: 'orgal-voice-ready', token: token }, '*'); } catch (e) {}
+    setTimeout(function () { if (!$('prompt').textContent) show(0); }, 1200);
+  } else {
+    show(0);
+  }
 })();
 </script>
 </body>
