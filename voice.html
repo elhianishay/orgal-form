@@ -18,7 +18,7 @@
   #heard { font-size: 14px; color: #888; min-height: 18px; }
   #state { font-size: 17px; font-weight: bold; margin: 8px 0; min-height: 22px; }
   .row { display: flex; gap: 8px; flex-wrap: wrap; }
-  .row button { flex: 1 1 30%; padding: 14px 6px; font-size: 17px; border-radius: 10px; border: 1px solid #999; background: #fff; }
+  .row button { flex: 1 1 22%; padding: 14px 6px; font-size: 17px; border-radius: 10px; border: 1px solid #999; background: #fff; }
   #mic { flex: 1 1 100%; background: #dc3545; color: #fff; border: none; font-size: 22px; }
   #mic.on { animation: pulse 1.1s infinite; }
   #next { background: #198754; color: #fff; border: none; }
@@ -38,6 +38,11 @@
 <body>
 <div class="top"><h1>🎤 הקראה מודרכת</h1><button id="mute" type="button" title="הקראת השאלות בקול">🔈</button></div>
 <div id="progress"><div id="bar"></div></div>
+<div class="row" style="margin-bottom:6px">
+  <select id="jump" style="flex:1 1 55%;font-size:16px;padding:10px;border-radius:10px;border:1px solid #999;background:#fff"><option value="">↪ קפוץ לשדה...</option></select>
+  <button id="sendTop" type="button" style="flex:1 1 40%;background:#198754;color:#fff;border:none;font-weight:bold">✅ שלח עכשיו</button>
+</div>
+<div id="sendState" style="margin:4px 0 8px;font-weight:bold"></div>
 
 <div id="wizard">
   <span id="secTag" class="sec sec-feed">נתוני הזנה</span>
@@ -48,19 +53,19 @@
   <div id="state"></div>
   <div class="row">
     <button id="mic" type="button">🎤 דבר</button>
+    <button id="clear" type="button">🔄 נקה ושוב</button>
     <button id="back" type="button">→ חזור</button>
     <button id="skip" type="button">דלג</button>
     <button id="next" type="button">הבא ←</button>
   </div>
-  <div id="hint">אחרי שערך נקלט עוברים לבד לשדה הבא (גרסת דף 4).<br>פקודות בקול: <b>חזור</b> (לתקן את הקודם) · <b>דלג</b> (להשאיר) · <b>סיים</b> (לסיכום) · בסיכום: <b>שלח</b><br>אפשר גם לתקן בהקלדה ואז «הבא».</div>
+  <div id="hint">הדף לא מקריא — רק מצפצף ומקשיב (גרסת דף 5). אחרי שערך נקלט עוברים לבד לשדה הבא.<br>לא נשמע טוב? <b>🔄 נקה ושוב</b> (או אמור «שוב») — נשארים באותו שדה.<br>צריך רק שדה אחד או שניים? בחר ב«קפוץ לשדה», אמור את הערך ולחץ <b>✅ שלח עכשיו</b> (או אמור «שלח»). נשלחים רק השדות שמילאת.</div>
 </div>
 
 <div id="summary">
   <div id="prompt2" style="font-size:20px;font-weight:bold;margin:6px 0">סיכום — בדוק ותקן לפני השליחה</div>
+  <button id="send" type="button" style="margin-top:4px;margin-bottom:8px">✅ שלח לאפליקציה</button>
   <table id="sumTable"></table>
-  <button id="send" type="button">✅ שלח לאפליקציה</button>
   <div class="row" style="margin-top:8px"><button id="sumBack" type="button">→ חזור לשאלות</button></div>
-  <div id="sendState" style="margin-top:8px;font-weight:bold"></div>
 </div>
 
 <script>
@@ -249,10 +254,11 @@
 
   // ---------- דיבור (שאלות בקול) ----------
   var muted = false;
-  try { muted = localStorage.getItem('orgalVoiceMute') === '1'; } catch (e) {}
+  muted = true; /* ברירת מחדל: לא מקריא */
+  try { muted = localStorage.getItem('orgalVoiceSpeak') !== '1'; } catch (e) {}
   function paintMute() { $('mute').textContent = muted ? '🔇' : '🔈'; }
   paintMute();
-  $('mute').onclick = function () { muted = !muted; try { localStorage.setItem('orgalVoiceMute', muted ? '1' : '0'); } catch (e) {} paintMute(); };
+  $('mute').onclick = function () { muted = !muted; try { localStorage.setItem('orgalVoiceSpeak', muted ? '0' : '1'); } catch (e) {} paintMute(); };
   var lastSpoken = '', speakGen = 0;
   function beep() {
     try {
@@ -292,6 +298,7 @@
   }
 
   // ---------- זיהוי דיבור ----------
+  var autoRetry = 0;
   var SR = window.SpeechRecognition || window.webkitSpeechRecognition;
   var rec = null, listening = false;
   function stopListen() { try { if (rec) rec.abort(); } catch (e) {} listening = false; $('mic').classList.remove('on'); }
@@ -300,7 +307,7 @@
     stopListen();
     rec = new SR();
     rec.lang = 'he-IL'; rec.interimResults = true; rec.continuous = false; rec.maxAlternatives = 1;
-    var finalText = '', myRec = rec;
+    var finalText = '', lastInterim = '', myRec = rec;
     rec.onstart = function () { listening = true; $('mic').classList.add('on'); $('state').textContent = '🎙 מקשיב...'; if (summaryMode) $('sendState').textContent = '🎙 מקשיב — אמור «שלח» או «חזור»'; };
     rec.onresult = function (ev) {
       var interim = '';
@@ -308,15 +315,16 @@
         if (ev.results[i].isFinal) finalText += ev.results[i][0].transcript + ' ';
         else interim += ev.results[i][0].transcript;
       }
+      lastInterim = interim;
       $('heard').textContent = (finalText + interim).trim();
     };
     rec.onerror = function (ev) {
       var e = ev && ev.error;
       if (e === 'aborted') return;
+      if (e === 'no-speech') return; /* onend ימשיך להקשיב */
       if (summaryMode && !sending) {
         if (e === 'not-allowed' || e === 'service-not-allowed') { $('sendState').textContent = '⛔ אין הרשאה למיקרופון — לחץ על הכפתור «שלח»'; return; }
-        $('sendState').textContent = '🎙 לא נשמע — אמור «שלח» או לחץ על הכפתור';
-        setTimeout(function () { if (summaryMode && !sending && !listening) listen(); }, 400);
+        $('sendState').textContent = '⚠ ' + e + ' — אמור «שלח» או לחץ על הכפתור';
         return;
       }
       $('state').textContent = (e === 'not-allowed' || e === 'service-not-allowed') ? '⛔ אין הרשאה למיקרופון לאתר הזה'
@@ -325,8 +333,16 @@
     rec.onend = function () {
       if (rec !== myRec) return;
       listening = false; $('mic').classList.remove('on');
-      var t = finalText.trim();
-      if (t) onHeard(t);
+      var t = (finalText.trim() || lastInterim.trim());
+      if (t) { autoRetry = 0; onHeard(t); return; }
+      /* אנדרואיד סוגר את המיקרופון בשקט אם לא דיברו מיד — ממשיכים להקשיב (עד כ-2 דקות) */
+      if (!sending && autoRetry < 15) {
+        autoRetry++;
+        setTimeout(function () { if (!listening && !sending && rec === myRec) listen(); }, 300);
+      } else if (!sending) {
+        $('state').textContent = '🎤 לחץ «דבר» כדי להמשיך';
+        if (summaryMode) $('sendState').textContent = '🎤 לחץ על «שלח לאפליקציה»';
+      }
     };
     try { rec.start(); } catch (e) { $('state').textContent = '⚠ ' + e.message; }
   }
@@ -335,14 +351,16 @@
     if (isEcho(t)) { listen(); return; }
     if (summaryMode) {
       var tt = t.trim(), short = tt.split(/\s+/).length <= 3;
-      if (short && /שלח|אישור|^כן|תכניס|הכנס/.test(tt)) { sendNow(); return; }
+      if (short && /שלח|שלך|שולח|תשלח|אישור|^כן|תכניס|הכנס|סנד|send/i.test(tt)) { sendNow(); return; }
       if (short && /חזור|אחורה/.test(tt)) { show(idx); return; }
       $('sendState').textContent = 'לא הובן «' + t + '» — אמור «שלח» או לחץ על הכפתור';
       listen();
       return;
     }
+    var tc = t.trim().replace(/[.!?,]+$/, '');
+    if (tc.split(/\s+/).length <= 2 && /^(שלח|שלך|תשלח|שלח עכשיו|שלח הכל)$/.test(tc)) { saveCur(); sendNow(); return; }
     if (isCmd(t, /^(הבא|כן|אישור|נכון|בסדר|אוקיי|אוקי)$/)) { goNext(); return; }
-    if (isCmd(t, /^(שוב|לא|תקן|מחדש)$/)) { $('value').value = ''; $('state').textContent = 'הקלט מחדש...'; listen(); return; }
+    if (isCmd(t, /^(שוב|לא|תקן|מחדש|נקה|מחק)$/)) { goClear(); return; }
     if (isCmd(t, /^(חזור|אחורה|קודם)$/)) { goBack(); return; }
     if (isCmd(t, /^(דלג|הלאה|אין)$/)) { goSkip(); return; }
     if (isCmd(t, /^(סיים|סיום|סיכום|זהו)$/)) { saveCur(); showSummary(); return; }
@@ -385,7 +403,10 @@
     $('heard').textContent = '';
     $('state').textContent = '';
     $('bar').style.width = Math.round(idx / STEPS.length * 100) + '%';
-    speak(st.say, function () { listen(); });
+    autoRetry = 0;
+    try { $('jump').value = ''; } catch (eJ) {}
+    if (muted) { beep(); setTimeout(function () { if (!summaryMode && STEPS[idx] === st) listen(); }, 250); }
+    else speak(st.say, function () { listen(); });
   }
   function loopEnds() { return /^LOOP/.test(STEPS[idx].key) && !$('value').value.trim(); }
   function goNext() { var end = loopEnds(); saveCur(); if (end || idx >= STEPS.length - 1) showSummary(); else show(idx + 1); }
@@ -393,6 +414,20 @@
   function goSkip() { var isLoop = /^LOOP/.test(STEPS[idx].key); delete values[STEPS[idx].key]; $('value').value = ''; if (isLoop || idx >= STEPS.length - 1) showSummary(); else show(idx + 1); }
   $('mic').onclick = function () { if (listening) stopListen(); else listen(); };
   $('next').onclick = goNext;
+  function goClear() {
+    delete values[STEPS[idx].key];
+    $('value').value = ''; $('heard').textContent = '';
+    $('state').textContent = '🔄 נמחק — אמור שוב';
+    autoRetry = 0; beep();
+    setTimeout(listen, 250);
+  }
+  $('clear').onclick = goClear;
+  (function () {
+    var sel = $('jump');
+    STEPS.forEach(function (st, i) { var o = document.createElement('option'); o.value = String(i); o.textContent = (i + 1) + '. ' + st.label; sel.appendChild(o); });
+    sel.onchange = function () { if (sel.value === '') return; saveCur(); show(parseInt(sel.value, 10)); };
+  })();
+  $('sendTop').onclick = function () { if (!summaryMode) saveCur(); sendNow(); };
   $('back').onclick = goBack;
   $('skip').onclick = goSkip;
   $('value').addEventListener('focus', stopListen);
@@ -412,8 +447,10 @@
     $('sumTable').innerHTML = html;
     summaryMode = true;
     $('sendState').textContent = '';
-    sending = false; $('send').disabled = false;
-    speak('סיכום. בדוק ואמור שלח', function () { if (summaryMode) listen(); });
+    sending = false; $('send').disabled = false; $('sendTop').disabled = false;
+    autoRetry = 0;
+    if (muted) { beep(); setTimeout(function () { if (summaryMode) listen(); }, 250); }
+    else speak('סיכום. בדוק ואמור שלח', function () { if (summaryMode) listen(); });
   }
   $('sumBack').onclick = function () { show(idx); };
   $('send').onclick = function () { sendNow(); };
@@ -422,16 +459,20 @@
     if (sending) return;
     stopListen();
     var out = {};
-    Array.prototype.forEach.call(document.querySelectorAll('#sumTable input'), function (inp) {
-      var v = inp.value.trim(); if (v) out[inp.getAttribute('data-k')] = v;
-    });
+    if (summaryMode) {
+      Array.prototype.forEach.call(document.querySelectorAll('#sumTable input'), function (inp) {
+        var v = inp.value.trim(); if (v) out[inp.getAttribute('data-k')] = v;
+      });
+    } else {
+      Object.keys(values).forEach(function (k) { var v = String(values[k] || '').trim(); if (v) out[k] = v; });
+    }
     var loops = [];
     for (var li = 1; li <= 6; li++) { if (out['LOOP' + li]) loops.push(out['LOOP' + li]); delete out['LOOP' + li]; }
     if (loops.length) out.LOOP = loops.join(' ');
-    if (!Object.keys(out).length) { $('sendState').textContent = 'לא הוזן אף ערך.'; return; }
+    if (!Object.keys(out).length) { $('sendState').textContent = 'לא הוזן אף ערך — אמור ערך או בחר שדה.'; if (!summaryMode) setTimeout(listen, 200); return; }
     if (!token) { $('sendState').textContent = 'הדף לא נפתח מהאפליקציה — חזור לאפליקציה ולחץ שם 🎤'; return; }
     sending = true;
-    $('send').disabled = true;
+    $('send').disabled = true; $('sendTop').disabled = true;
     $('sendState').textContent = '⏳ שולח לאפליקציה...';
     try { if (window.opener) window.opener.postMessage({ type: 'orgal-voice-fields', token: token, fields: out }, '*'); } catch (e) {}
     var body = JSON.stringify({ token: token, fields: out }), queued = false;
@@ -445,8 +486,8 @@
     try {
       fetch(RELAY_URL, { method: 'POST', mode: 'no-cors', headers: { 'Content-Type': 'text/plain;charset=utf-8' }, body: body })
         .then(sentOk)
-        .catch(function () { sending = false; $('send').disabled = false; $('sendState').textContent = '⚠ השליחה נכשלה (אינטרנט?) — לחץ «שלח» שוב'; });
-    } catch (eF) { sending = false; $('send').disabled = false; $('sendState').textContent = '⚠ השליחה נכשלה — לחץ «שלח» שוב'; }
+        .catch(function () { sending = false; $('send').disabled = false; $('sendTop').disabled = false; $('sendState').textContent = '⚠ השליחה נכשלה (אינטרנט?) — לחץ «שלח» שוב'; });
+    } catch (eF) { sending = false; $('send').disabled = false; $('sendTop').disabled = false; $('sendState').textContent = '⚠ השליחה נכשלה — לחץ «שלח» שוב'; }
   }
 
   // ---------- חיבור לאפליקציה: ערכים קיימים בשורה ----------
