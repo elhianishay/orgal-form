@@ -58,7 +58,7 @@
     <button id="skip" type="button">דלג</button>
     <button id="next" type="button">הבא ←</button>
   </div>
-  <div id="hint">הדף לא מקריא — רק מצפצף ומקשיב (גרסת דף 7). אחרי שערך נקלט עוברים לבד לשדה הבא.<br>לא נשמע טוב? <b>🔄 נקה ושוב</b> (או אמור «שוב») — נשארים באותו שדה.<br>צריך רק שדה אחד או שניים? בחר ב«קפוץ לשדה», אמור את הערך ולחץ <b>✅ שלח עכשיו</b> (או אמור «שלח»). נשלחים רק השדות שמילאת.</div>
+  <div id="hint">הדף לא מקריא — רק מצפצף ומקשיב (גרסת דף 8). אחרי שערך נקלט עוברים לבד לשדה הבא.<br>לא נשמע טוב? <b>🔄 נקה ושוב</b> (או אמור «שוב») — נשארים באותו שדה.<br>צריך רק שדה אחד או שניים? בחר ב«קפוץ לשדה», אמור את הערך ולחץ <b>✅ שלח עכשיו</b> (או אמור «שלח»). נשלחים רק השדות שמילאת.</div>
 </div>
 
 <div id="summary">
@@ -308,8 +308,9 @@
     rec = new SR();
     rec.lang = 'he-IL'; rec.interimResults = true; rec.continuous = false; rec.maxAlternatives = 1;
     var finalText = '', lastInterim = '', myRec = rec;
-    rec.onstart = function () { listening = true; $('mic').classList.add('on'); $('state').textContent = '🎙 מקשיב...'; if (summaryMode) $('sendState').textContent = '🎙 מקשיב — אמור «שלח» או «חזור»'; };
+    rec.onstart = function () { if (rec !== myRec) return; listening = true; $('mic').classList.add('on'); $('state').textContent = '🎙 מקשיב...'; if (summaryMode) $('sendState').textContent = '🎙 מקשיב — אמור «שלח» או «חזור»'; };
     rec.onresult = function (ev) {
+      if (rec !== myRec) return;
       var interim = '';
       for (var i = ev.resultIndex; i < ev.results.length; i++) {
         if (ev.results[i].isFinal) finalText += ev.results[i][0].transcript + ' ';
@@ -463,13 +464,16 @@
       return k;
     }).join(', ');
   }
-  function afterSent(msg) {
+  var afterDoneSeq = 0;
+  function afterSent(msg, seq) {
+    $('sendState').textContent = msg;
+    if (seq && seq <= afterDoneSeq) return; /* כבר טופל (אישור כפול) — לא להפעיל מיקרופון שוב */
+    afterDoneSeq = seq || afterDoneSeq;
     sending = false;
     $('send').disabled = false; $('sendTop').disabled = false;
-    $('sendState').textContent = msg;
     beep();
     autoRetry = 0;
-    setTimeout(function () { if (!sending && !listening) listen(); }, 400);
+    setTimeout(function () { if (!sending) listen(); }, 400);
   }
   /* בודק בממסר: האם השליחה הגיעה, והאם האפליקציה אישרה שקיבלה */
   var watchTimer = null;
@@ -521,7 +525,7 @@
     var body = JSON.stringify({ token: token, seq: mySeq, fields: out });
     var sentOk = function () {
       if (ackedSeq >= mySeq) return;
-      afterSent('📤 נשלח (' + lbl + ') — חזור לטאב של האפליקציה, יתמלא תוך כמה שניות.');
+      afterSent('📤 נשלח (' + lbl + ') — חזור לטאב של האפליקציה, יתמלא תוך כמה שניות.', mySeq);
       watchRelay(mySeq, lbl);
     };
     var failed = function () {
@@ -547,7 +551,7 @@
       if (d.count < 0) { sending = false; $('send').disabled = false; $('sendTop').disabled = false; $('sendState').textContent = '⚠ החלון הזה כבר לא מקושר לאפליקציה — סגור אותו ולחץ שוב 🎤 באפליקציה.'; return; }
       ackedSeq = sendSeq;
       if (watchTimer) { clearInterval(watchTimer); watchTimer = null; }
-      afterSent('✅ האפליקציה קיבלה ' + d.count + ' שדות. אפשר להמשיך ולשלוח שוב, או לסגור את הטאב.');
+      afterSent('✅ האפליקציה קיבלה ' + d.count + ' שדות. אפשר להמשיך ולשלוח שוב, או לסגור את הטאב.', sendSeq);
       return;
     }
     if (d.type !== 'orgal-voice-init' || d.token !== token) return;
