@@ -58,7 +58,7 @@
     <button id="skip" type="button">דלג</button>
     <button id="next" type="button">הבא ←</button>
   </div>
-  <div id="hint">הדף לא מקריא — רק מצפצף ומקשיב (גרסת דף 5). אחרי שערך נקלט עוברים לבד לשדה הבא.<br>לא נשמע טוב? <b>🔄 נקה ושוב</b> (או אמור «שוב») — נשארים באותו שדה.<br>צריך רק שדה אחד או שניים? בחר ב«קפוץ לשדה», אמור את הערך ולחץ <b>✅ שלח עכשיו</b> (או אמור «שלח»). נשלחים רק השדות שמילאת.</div>
+  <div id="hint">הדף לא מקריא — רק מצפצף ומקשיב (גרסת דף 6). אחרי שערך נקלט עוברים לבד לשדה הבא.<br>לא נשמע טוב? <b>🔄 נקה ושוב</b> (או אמור «שוב») — נשארים באותו שדה.<br>צריך רק שדה אחד או שניים? בחר ב«קפוץ לשדה», אמור את הערך ולחץ <b>✅ שלח עכשיו</b> (או אמור «שלח»). נשלחים רק השדות שמילאת.</div>
 </div>
 
 <div id="summary">
@@ -358,7 +358,8 @@
       return;
     }
     var tc = t.trim().replace(/[.!?,]+$/, '');
-    if (tc.split(/\s+/).length <= 2 && /^(שלח|שלך|תשלח|שלח עכשיו|שלח הכל)$/.test(tc)) { saveCur(); sendNow(); return; }
+    /* «שלח» — סובלני לזיהוי: שלך / שולח / תשלח / לשלוח / שלח עכשיו (בלי מספרים, עד 3 מילים) */
+    if (tc.split(/\s+/).length <= 3 && !/\d/.test(tc) && /(^|\s)(ו?ת?שלח|שלך|שולח|לשלוח|שלחי|סלח|סנד|send)(\s|$)/i.test(tc)) { saveCur(); sendNow(); return; }
     if (isCmd(t, /^(הבא|כן|אישור|נכון|בסדר|אוקיי|אוקי)$/)) { goNext(); return; }
     if (isCmd(t, /^(שוב|לא|תקן|מחדש|נקה|מחק)$/)) { goClear(); return; }
     if (isCmd(t, /^(חזור|אחורה|קודם)$/)) { goBack(); return; }
@@ -454,7 +455,22 @@
   }
   $('sumBack').onclick = function () { show(idx); };
   $('send').onclick = function () { sendNow(); };
-  var sending = false;
+  var sending = false, sendSeq = 0, ackedSeq = 0;
+  function sentLabels(out) {
+    return Object.keys(out).map(function (k) {
+      if (k === 'LOOP') return 'לולאה (' + String(out.LOOP).split(/\s+/).length + ')';
+      for (var i = 0; i < STEPS.length; i++) if (STEPS[i].key === k) return STEPS[i].label.replace(/\s*\[.*?\]/, '');
+      return k;
+    }).join(', ');
+  }
+  function afterSent(msg) {
+    sending = false;
+    $('send').disabled = false; $('sendTop').disabled = false;
+    $('sendState').textContent = msg;
+    beep();
+    autoRetry = 0;
+    setTimeout(function () { if (!sending && !listening) listen(); }, 400);
+  }
   function sendNow() {
     if (sending) return;
     stopListen();
@@ -474,13 +490,13 @@
     sending = true;
     $('send').disabled = true; $('sendTop').disabled = true;
     $('sendState').textContent = '⏳ שולח לאפליקציה...';
-    try { if (window.opener) window.opener.postMessage({ type: 'orgal-voice-fields', token: token, fields: out }, '*'); } catch (e) {}
-    var body = JSON.stringify({ token: token, fields: out }), queued = false;
+    var mySeq = ++sendSeq, nSent = Object.keys(out).length + (out.LOOP ? String(out.LOOP).split(/\s+/).length - 1 : 0), lbl = sentLabels(out);
+    try { if (window.opener) window.opener.postMessage({ type: 'orgal-voice-fields', token: token, seq: mySeq, fields: out }, '*'); } catch (e) {}
+    var body = JSON.stringify({ token: token, seq: mySeq, fields: out }), queued = false;
     try { queued = !!(navigator.sendBeacon && navigator.sendBeacon(RELAY_URL, new Blob([body], { type: 'text/plain;charset=utf-8' }))); } catch (eB) {}
     var sentOk = function () {
-      if (!sending || /נקלט באפליקציה/.test($('sendState').textContent)) return;
-      $('sendState').textContent = '✅ נשלח! חזור לטאב של האפליקציה — השדות יתמלאו תוך כמה שניות. (אפשר לסגור את הטאב הזה)';
-      beep();
+      if (ackedSeq >= mySeq) return;
+      afterSent('✅ נשלח (' + lbl + '). חזור לטאב של האפליקציה — יתמלא תוך כמה שניות. אפשר גם להמשיך ולשלוח שוב.');
     };
     if (queued) { setTimeout(sentOk, 300); return; }
     try {
@@ -495,10 +511,9 @@
     var d = ev.data || {};
     if (d.type === 'orgal-voice-ack' && d.token === token) {
       if (ackTimer) { clearTimeout(ackTimer); ackTimer = null; }
-      if (d.count < 0) { $('sendState').textContent = '⚠ החלון הזה כבר לא מקושר לאפליקציה — סגור אותו ולחץ שוב 🎤 באפליקציה.'; return; }
-      $('sendState').textContent = '✅ נקלט באפליקציה — ' + d.count + ' שדות';
-      sending = true;
-      setTimeout(function () { try { window.close(); } catch (e) {} }, 1200);
+      if (d.count < 0) { sending = false; $('send').disabled = false; $('sendTop').disabled = false; $('sendState').textContent = '⚠ החלון הזה כבר לא מקושר לאפליקציה — סגור אותו ולחץ שוב 🎤 באפליקציה.'; return; }
+      ackedSeq = sendSeq;
+      afterSent('✅ האפליקציה קיבלה ' + d.count + ' שדות. אפשר להמשיך ולשלוח שוב, או לסגור את הטאב.');
       return;
     }
     if (d.type !== 'orgal-voice-init' || d.token !== token) return;
