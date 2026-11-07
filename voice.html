@@ -58,7 +58,7 @@
     <button id="skip" type="button">דלג</button>
     <button id="next" type="button">הבא ←</button>
   </div>
-  <div id="hint">הדף לא מקריא — רק מצפצף ומקשיב (גרסת דף 8). אחרי שערך נקלט עוברים לבד לשדה הבא.<br>לא נשמע טוב? <b>🔄 נקה ושוב</b> (או אמור «שוב») — נשארים באותו שדה.<br>צריך רק שדה אחד או שניים? בחר ב«קפוץ לשדה», אמור את הערך ולחץ <b>✅ שלח עכשיו</b> (או אמור «שלח»). נשלחים רק השדות שמילאת.</div>
+  <div id="hint">הדף לא מקריא — רק מצפצף ומקשיב (גרסת דף 9). אחרי שערך נקלט עוברים לבד לשדה הבא.<br>לא נשמע טוב? <b>🔄 נקה ושוב</b> (או אמור «שוב») — נשארים באותו שדה.<br>צריך רק שדה אחד או שניים? בחר ב«קפוץ לשדה», אמור את הערך ולחץ <b>✅ שלח עכשיו</b> (או אמור «שלח»). נשלחים רק השדות שמילאת.</div>
 </div>
 
 <div id="summary">
@@ -68,7 +68,10 @@
   <div class="row" style="margin-top:8px"><button id="sumBack" type="button">→ חזור לשאלות</button></div>
 </div>
 
+<div id="dbg" style="font-size:11px;color:#a00;margin-top:10px;direction:ltr;text-align:left"></div>
 <script>
+window.onerror = function (m, src, line) { try { var d = document.getElementById('dbg'); if (d) d.textContent += ' [שגיאה: ' + m + ' @' + line + ']'; } catch (e) {} };
+function dbg(t) { try { var d = document.getElementById('dbg'); if (d) d.textContent = (d.textContent + ' · ' + t).slice(-400); } catch (e) {} }
 (function () {
   'use strict';
   // דף עצמאי מחוץ למסגרת של Google (שחוסמת מיקרופון). שואל שדה אחר שדה, מציג לאישור, ושולח לאפליקציה שפתחה אותו.
@@ -536,11 +539,30 @@
       sending = false; $('send').disabled = false; $('sendTop').disabled = false;
       $('sendState').textContent = '⚠ השליחה נכשלה (אינטרנט?) — לחץ «שלח» שוב';
     };
+    /* שולחים בשתי דרכים במקביל — מה שמגיע ראשון מספיק (הממסר שומר את השליחה החדשה ביותר) */
+    var okOnce = false, fails = 0;
+    var ok1 = function () { if (okOnce) return; okOnce = true; clearTimeout(guard); sentOk(); };
+    var fail1 = function (why) { fails++; dbg('שליחה: ' + why); if (fails >= 2 && !okOnce) { clearTimeout(guard); failed(); } };
+    /* 1) GET דרך תמונה — עובד בכל דפדפן (גם Via); התשובה אינה תמונה ולכן onerror = הגיע תשובה מהשרת */
     try {
-      /* שליחה מיידית (sendBeacon באנדרואיד לפעמים מתעכב עד השליחה הבאה) */
-      fetch(RELAY_URL, { method: 'POST', mode: 'no-cors', cache: 'no-store', headers: { 'Content-Type': 'text/plain;charset=utf-8' }, body: body })
-        .then(sentOk).catch(failed);
-    } catch (eF) { failed(); }
+      var img = new Image();
+      img.onload = ok1;
+      img.onerror = ok1;
+      img.src = RELAY_URL + '?put=' + encodeURIComponent(token) + '&seq=' + mySeq + '&d=' + encodeURIComponent(JSON.stringify(out)) + '&n=' + Date.now();
+    } catch (eI) { fail1('img ' + eI.message); }
+    /* 2) POST רגיל */
+    try {
+      if (window.fetch) fetch(RELAY_URL, { method: 'POST', mode: 'no-cors', cache: 'no-store', headers: { 'Content-Type': 'text/plain;charset=utf-8' }, body: body })
+        .then(ok1).catch(function (e) { fail1('post ' + (e && e.message)); });
+      else fail1('אין fetch');
+    } catch (eF) { fail1('post ' + eF.message); }
+    /* לא נתקעים לעולם: אחרי 8 שניות משחררים את הכפתור */
+    var guard = setTimeout(function () {
+      if (okOnce) return;
+      sending = false; $('send').disabled = false; $('sendTop').disabled = false;
+      $('sendState').textContent = '⚠ אין תשובה מהשרת (אינטרנט חלש?) — לחץ «שלח» שוב';
+      dbg('שליחה: אין תשובה 8 שניות');
+    }, 8000);
   }
 
   // ---------- חיבור לאפליקציה: ערכים קיימים בשורה ----------
