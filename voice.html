@@ -52,7 +52,7 @@
     <button id="skip" type="button">דלג</button>
     <button id="next" type="button">הבא ←</button>
   </div>
-  <div id="hint">אחרי שערך נקלט עוברים לבד לשדה הבא (גרסת דף 3).<br>פקודות בקול: <b>חזור</b> (לתקן את הקודם) · <b>דלג</b> (להשאיר) · <b>סיים</b> (לסיכום) · בסיכום: <b>שלח</b><br>אפשר גם לתקן בהקלדה ואז «הבא».</div>
+  <div id="hint">אחרי שערך נקלט עוברים לבד לשדה הבא (גרסת דף 4).<br>פקודות בקול: <b>חזור</b> (לתקן את הקודם) · <b>דלג</b> (להשאיר) · <b>סיים</b> (לסיכום) · בסיכום: <b>שלח</b><br>אפשר גם לתקן בהקלדה ואז «הבא».</div>
 </div>
 
 <div id="summary">
@@ -238,11 +238,11 @@
     { sec: 'main', key: 'pI', label: 'ראשי — כיול I (מגנטי)', say: 'כיול מגנטי של המפסק הראשי', ex: '1000 · 5.5', type: 'calib' },
     { sec: 'meas', key: 'VOLT', label: 'מתח L1N / L2N / L3N', say: 'המתחים: L1, L2, L3', ex: '230 231 229', type: 'list' },
     { sec: 'meas', key: 'LOOP1', label: 'לולאת תקלה — ערך 1 [Ω]', say: 'לולאת תקלה, ערך ראשון', ex: 'אפס נקודה שלוש חמש → 0.35', type: 'ohm' },
-    { sec: 'meas', key: 'LOOP2', label: 'לולאת תקלה — ערך 2 [Ω]', say: 'ערך שני, או סיים', ex: '0.4 · «סיים» אם אין עוד', type: 'ohm' },
-    { sec: 'meas', key: 'LOOP3', label: 'לולאת תקלה — ערך 3 [Ω]', say: 'ערך שלישי, או סיים', ex: '0.38 · «סיים» אם אין עוד', type: 'ohm' },
-    { sec: 'meas', key: 'LOOP4', label: 'לולאת תקלה — ערך 4 [Ω]', say: 'ערך רביעי, או סיים', ex: '0.41 · «סיים» אם אין עוד', type: 'ohm' },
-    { sec: 'meas', key: 'LOOP5', label: 'לולאת תקלה — ערך 5 [Ω]', say: 'ערך חמישי, או סיים', ex: '«סיים» אם אין עוד', type: 'ohm' },
-    { sec: 'meas', key: 'LOOP6', label: 'לולאת תקלה — ערך 6 [Ω]', say: 'ערך שישי, או סיים', ex: '«סיים» אם אין עוד', type: 'ohm' }
+    { sec: 'meas', key: 'LOOP2', label: 'לולאת תקלה — ערך 2 [Ω]', say: 'ערך שני', ex: '0.4 · «סיים» אם אין עוד', type: 'ohm' },
+    { sec: 'meas', key: 'LOOP3', label: 'לולאת תקלה — ערך 3 [Ω]', say: 'ערך שלישי', ex: '0.38 · «סיים» אם אין עוד', type: 'ohm' },
+    { sec: 'meas', key: 'LOOP4', label: 'לולאת תקלה — ערך 4 [Ω]', say: 'ערך רביעי', ex: '0.41 · «סיים» אם אין עוד', type: 'ohm' },
+    { sec: 'meas', key: 'LOOP5', label: 'לולאת תקלה — ערך 5 [Ω]', say: 'ערך חמישי', ex: '«סיים» אם אין עוד', type: 'ohm' },
+    { sec: 'meas', key: 'LOOP6', label: 'לולאת תקלה — ערך 6 [Ω]', say: 'ערך שישי', ex: '«סיים» אם אין עוד', type: 'ohm' }
   ];
   var SEC_NAME = { feed: 'נתוני הזנה', main: 'מפסק ראשי של הלוח', meas: 'מדידות' };
   var values = {}, current = {}, idx = 0;
@@ -253,15 +253,40 @@
   function paintMute() { $('mute').textContent = muted ? '🔇' : '🔈'; }
   paintMute();
   $('mute').onclick = function () { muted = !muted; try { localStorage.setItem('orgalVoiceMute', muted ? '1' : '0'); } catch (e) {} paintMute(); };
+  var lastSpoken = '', speakGen = 0;
+  function beep() {
+    try {
+      var AC = window.AudioContext || window.webkitAudioContext; if (!AC) return;
+      beep.ctx = beep.ctx || new AC();
+      var o = beep.ctx.createOscillator(), g = beep.ctx.createGain();
+      o.frequency.value = 880; g.gain.value = 0.15; o.connect(g); g.connect(beep.ctx.destination);
+      o.start(); o.stop(beep.ctx.currentTime + 0.12);
+    } catch (e) {}
+  }
+  /* האם המיקרופון קלט את הקול של הדף עצמו */
+  function cleanTxt(x) { return normalize(x).replace(/[^\u0590-\u05FFa-z0-9 ]/gi, ' ').replace(/\s+/g, ' ').trim(); }
+  function isEcho(t) {
+    var a = cleanTxt(t), b = cleanTxt(lastSpoken);
+    if (!a || !b || a.split(' ').length < 2) return false;
+    /* הד = רוב השאלה שהדף הקריא (תשובה קצרה כמו «חיוני» לא נחשבת הד) */
+    return (b.indexOf(a) >= 0 && a.length >= b.length * 0.5) || a.indexOf(b) >= 0;
+  }
   function speak(text, then) {
-    if (muted || !window.speechSynthesis) { then && then(); return; }
+    if (muted || !window.speechSynthesis) { ++speakGen; then && then(); return; }
     try {
       if (speechSynthesis.speaking || speechSynthesis.pending) speechSynthesis.cancel();
       var u = new SpeechSynthesisUtterance(text);
       u.lang = 'he-IL'; u.rate = 1.2;
-      var done = false, fin = function () { if (!done) { done = true; then && then(); } };
+      var myGen = ++speakGen;
+      var done = false, t0 = Date.now(), minMs = 350 + String(text).length * 55;
+      var fin = function () { if (done) return; done = true; clearInterval(pollT); setTimeout(function () { if (myGen === speakGen) then && then(); }, 300); };
       u.onend = fin; u.onerror = fin;
-      setTimeout(fin, Math.min(3500, 600 + String(text).length * 65));
+      var pollT = setInterval(function () {
+        var el = Date.now() - t0;
+        if (el > minMs && !speechSynthesis.speaking && !speechSynthesis.pending) fin();
+        else if (el > minMs * 2 + 2500) fin();
+      }, 150);
+      lastSpoken = String(text);
       speechSynthesis.speak(u);
     } catch (e) { then && then(); }
   }
@@ -288,6 +313,12 @@
     rec.onerror = function (ev) {
       var e = ev && ev.error;
       if (e === 'aborted') return;
+      if (summaryMode && !sending) {
+        if (e === 'not-allowed' || e === 'service-not-allowed') { $('sendState').textContent = '⛔ אין הרשאה למיקרופון — לחץ על הכפתור «שלח»'; return; }
+        $('sendState').textContent = '🎙 לא נשמע — אמור «שלח» או לחץ על הכפתור';
+        setTimeout(function () { if (summaryMode && !sending && !listening) listen(); }, 400);
+        return;
+      }
       $('state').textContent = (e === 'not-allowed' || e === 'service-not-allowed') ? '⛔ אין הרשאה למיקרופון לאתר הזה'
         : (e === 'no-speech' ? '🤫 לא נשמע — לחץ «דבר»' : '⚠ ' + e);
     };
@@ -301,9 +332,11 @@
   }
   function isCmd(t, re) { return re.test(t.trim()); }
   function onHeard(t) {
+    if (isEcho(t)) { listen(); return; }
     if (summaryMode) {
-      if (/שלח|אישור|כן|סיים|תכניס|הכנס/.test(t)) { sendNow(); return; }
-      if (/חזור|אחורה/.test(t)) { show(idx); return; }
+      var tt = t.trim(), short = tt.split(/\s+/).length <= 3;
+      if (short && /שלח|אישור|^כן|תכניס|הכנס/.test(tt)) { sendNow(); return; }
+      if (short && /חזור|אחורה/.test(tt)) { show(idx); return; }
       $('sendState').textContent = 'לא הובן «' + t + '» — אמור «שלח» או לחץ על הכפתור';
       listen();
       return;
@@ -321,10 +354,11 @@
       $('state').textContent = '✔ נקלט: ' + v;
       saveCur();
       var myIdx = idx;
-      speak(String(v), function () {
+      beep();
+      setTimeout(function () {
         if (summaryMode || idx !== myIdx) return;
         if (idx >= STEPS.length - 1) showSummary(); else show(idx + 1);
-      });
+      }, 450);
     } else {
       $('state').textContent = '❓ לא זוהה ערך — נסה שוב';
       listen();
@@ -378,11 +412,14 @@
     $('sumTable').innerHTML = html;
     summaryMode = true;
     $('sendState').textContent = '';
-    speak('סיכום. אמור שלח כדי להכניס לאפליקציה, או חזור', function () { if (summaryMode) listen(); });
+    sending = false; $('send').disabled = false;
+    speak('סיכום. בדוק ואמור שלח', function () { if (summaryMode) listen(); });
   }
   $('sumBack').onclick = function () { show(idx); };
   $('send').onclick = function () { sendNow(); };
+  var sending = false;
   function sendNow() {
+    if (sending) return;
     stopListen();
     var out = {};
     Array.prototype.forEach.call(document.querySelectorAll('#sumTable input'), function (inp) {
@@ -393,24 +430,23 @@
     if (loops.length) out.LOOP = loops.join(' ');
     if (!Object.keys(out).length) { $('sendState').textContent = 'לא הוזן אף ערך.'; return; }
     if (!token) { $('sendState').textContent = 'הדף לא נפתח מהאפליקציה — חזור לאפליקציה ולחץ שם 🎤'; return; }
-    try { if (window.opener) window.opener.postMessage({ type: 'orgal-voice-fields', token: token, fields: out }, '*'); } catch (e) {}
+    sending = true;
+    $('send').disabled = true;
     $('sendState').textContent = '⏳ שולח לאפליקציה...';
-    if (ackTimer) clearTimeout(ackTimer);
-    ackTimer = setTimeout(function () {
-      $('sendState').textContent = '⚠ לא התקבל אישור. בדוק חיבור לאינטרנט ולחץ «שלח» שוב.';
-    }, 8000);
+    try { if (window.opener) window.opener.postMessage({ type: 'orgal-voice-fields', token: token, fields: out }, '*'); } catch (e) {}
+    var body = JSON.stringify({ token: token, fields: out }), queued = false;
+    try { queued = !!(navigator.sendBeacon && navigator.sendBeacon(RELAY_URL, new Blob([body], { type: 'text/plain;charset=utf-8' }))); } catch (eB) {}
+    var sentOk = function () {
+      if (!sending || /נקלט באפליקציה/.test($('sendState').textContent)) return;
+      $('sendState').textContent = '✅ נשלח! חזור לטאב של האפליקציה — השדות יתמלאו תוך כמה שניות. (אפשר לסגור את הטאב הזה)';
+      beep();
+    };
+    if (queued) { setTimeout(sentOk, 300); return; }
     try {
-      fetch(RELAY_URL, { method: 'POST', mode: 'no-cors', keepalive: true, headers: { 'Content-Type': 'text/plain;charset=utf-8' },
-        body: JSON.stringify({ token: token, fields: out }) })
-        .then(function () {
-          if (!ackTimer) return; /* כבר אושר ישירות */
-          clearTimeout(ackTimer); ackTimer = null;
-          $('sendState').textContent = '✅ נשלח — חזור לטאב של האפליקציה, השדות יתמלאו תוך כמה שניות';
-          speak('נשלח. חזור לאפליקציה', null);
-          setTimeout(function () { try { window.close(); } catch (e) {} }, 2500);
-        })
-        .catch(function () { if (ackTimer) { clearTimeout(ackTimer); ackTimer = null; } $('sendState').textContent = '⚠ אין חיבור לאינטרנט — לחץ «שלח» שוב'; });
-    } catch (eF) {}
+      fetch(RELAY_URL, { method: 'POST', mode: 'no-cors', headers: { 'Content-Type': 'text/plain;charset=utf-8' }, body: body })
+        .then(sentOk)
+        .catch(function () { sending = false; $('send').disabled = false; $('sendState').textContent = '⚠ השליחה נכשלה (אינטרנט?) — לחץ «שלח» שוב'; });
+    } catch (eF) { sending = false; $('send').disabled = false; $('sendState').textContent = '⚠ השליחה נכשלה — לחץ «שלח» שוב'; }
   }
 
   // ---------- חיבור לאפליקציה: ערכים קיימים בשורה ----------
@@ -420,7 +456,7 @@
       if (ackTimer) { clearTimeout(ackTimer); ackTimer = null; }
       if (d.count < 0) { $('sendState').textContent = '⚠ החלון הזה כבר לא מקושר לאפליקציה — סגור אותו ולחץ שוב 🎤 באפליקציה.'; return; }
       $('sendState').textContent = '✅ נקלט באפליקציה — ' + d.count + ' שדות';
-      speak('נקלט', null);
+      sending = true;
       setTimeout(function () { try { window.close(); } catch (e) {} }, 1200);
       return;
     }
