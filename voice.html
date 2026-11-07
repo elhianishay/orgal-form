@@ -58,7 +58,7 @@
     <button id="skip" type="button">דלג</button>
     <button id="next" type="button">הבא ←</button>
   </div>
-  <div id="hint">הדף לא מקריא — רק מצפצף ומקשיב (גרסת דף 6). אחרי שערך נקלט עוברים לבד לשדה הבא.<br>לא נשמע טוב? <b>🔄 נקה ושוב</b> (או אמור «שוב») — נשארים באותו שדה.<br>צריך רק שדה אחד או שניים? בחר ב«קפוץ לשדה», אמור את הערך ולחץ <b>✅ שלח עכשיו</b> (או אמור «שלח»). נשלחים רק השדות שמילאת.</div>
+  <div id="hint">הדף לא מקריא — רק מצפצף ומקשיב (גרסת דף 7). אחרי שערך נקלט עוברים לבד לשדה הבא.<br>לא נשמע טוב? <b>🔄 נקה ושוב</b> (או אמור «שוב») — נשארים באותו שדה.<br>צריך רק שדה אחד או שניים? בחר ב«קפוץ לשדה», אמור את הערך ולחץ <b>✅ שלח עכשיו</b> (או אמור «שלח»). נשלחים רק השדות שמילאת.</div>
 </div>
 
 <div id="summary">
@@ -471,6 +471,32 @@
     autoRetry = 0;
     setTimeout(function () { if (!sending && !listening) listen(); }, 400);
   }
+  /* בודק בממסר: האם השליחה הגיעה, והאם האפליקציה אישרה שקיבלה */
+  var watchTimer = null;
+  function watchRelay(seq, lbl) {
+    if (watchTimer) clearInterval(watchTimer);
+    var t0 = Date.now(), arrived = false;
+    watchTimer = setInterval(function () {
+      if (sendSeq !== seq || Date.now() - t0 > 120000) {
+        clearInterval(watchTimer); watchTimer = null;
+        if (sendSeq === seq && ackedSeq < seq) $('sendState').textContent = (arrived ? '📨 הגיע לממסר' : '⚠ לא אושר שהגיע לממסר') + ' — האפליקציה עוד לא אספה. פתוח טאב האפליקציה? אפשר ללחוץ «שלח» שוב.';
+        return;
+      }
+      fetch(RELAY_URL + '?peek=' + encodeURIComponent(token) + '&n=' + Date.now(), { cache: 'no-store', credentials: 'omit' })
+        .then(function (r) { return r.json(); })
+        .then(function (o) {
+          if (sendSeq !== seq || ackedSeq >= seq) return;
+          if (o.ack >= seq) {
+            ackedSeq = seq; clearInterval(watchTimer); watchTimer = null;
+            $('sendState').textContent = '✅ האפליקציה קיבלה ' + o.count + ' שדות (' + lbl + '). אפשר להמשיך ולשלוח שוב.';
+            beep();
+          } else if (o.seq >= seq && !arrived) {
+            arrived = true;
+            $('sendState').textContent = '📨 הגיע לממסר (' + lbl + ') — מחכה שהאפליקציה תאסוף. חזור לטאב של האפליקציה.';
+          }
+        }).catch(function () {});
+    }, 1500);
+  }
   function sendNow() {
     if (sending) return;
     stopListen();
@@ -492,18 +518,25 @@
     $('sendState').textContent = '⏳ שולח לאפליקציה...';
     var mySeq = ++sendSeq, nSent = Object.keys(out).length + (out.LOOP ? String(out.LOOP).split(/\s+/).length - 1 : 0), lbl = sentLabels(out);
     try { if (window.opener) window.opener.postMessage({ type: 'orgal-voice-fields', token: token, seq: mySeq, fields: out }, '*'); } catch (e) {}
-    var body = JSON.stringify({ token: token, seq: mySeq, fields: out }), queued = false;
-    try { queued = !!(navigator.sendBeacon && navigator.sendBeacon(RELAY_URL, new Blob([body], { type: 'text/plain;charset=utf-8' }))); } catch (eB) {}
+    var body = JSON.stringify({ token: token, seq: mySeq, fields: out });
     var sentOk = function () {
       if (ackedSeq >= mySeq) return;
-      afterSent('✅ נשלח (' + lbl + '). חזור לטאב של האפליקציה — יתמלא תוך כמה שניות. אפשר גם להמשיך ולשלוח שוב.');
+      afterSent('📤 נשלח (' + lbl + ') — חזור לטאב של האפליקציה, יתמלא תוך כמה שניות.');
+      watchRelay(mySeq, lbl);
     };
-    if (queued) { setTimeout(sentOk, 300); return; }
+    var failed = function () {
+      /* גיבוי: sendBeacon */
+      var q = false;
+      try { q = !!(navigator.sendBeacon && navigator.sendBeacon(RELAY_URL, new Blob([body], { type: 'text/plain;charset=utf-8' }))); } catch (eB) {}
+      if (q) { sentOk(); return; }
+      sending = false; $('send').disabled = false; $('sendTop').disabled = false;
+      $('sendState').textContent = '⚠ השליחה נכשלה (אינטרנט?) — לחץ «שלח» שוב';
+    };
     try {
-      fetch(RELAY_URL, { method: 'POST', mode: 'no-cors', headers: { 'Content-Type': 'text/plain;charset=utf-8' }, body: body })
-        .then(sentOk)
-        .catch(function () { sending = false; $('send').disabled = false; $('sendTop').disabled = false; $('sendState').textContent = '⚠ השליחה נכשלה (אינטרנט?) — לחץ «שלח» שוב'; });
-    } catch (eF) { sending = false; $('send').disabled = false; $('sendTop').disabled = false; $('sendState').textContent = '⚠ השליחה נכשלה — לחץ «שלח» שוב'; }
+      /* שליחה מיידית (sendBeacon באנדרואיד לפעמים מתעכב עד השליחה הבאה) */
+      fetch(RELAY_URL, { method: 'POST', mode: 'no-cors', cache: 'no-store', headers: { 'Content-Type': 'text/plain;charset=utf-8' }, body: body })
+        .then(sentOk).catch(failed);
+    } catch (eF) { failed(); }
   }
 
   // ---------- חיבור לאפליקציה: ערכים קיימים בשורה ----------
@@ -513,6 +546,7 @@
       if (ackTimer) { clearTimeout(ackTimer); ackTimer = null; }
       if (d.count < 0) { sending = false; $('send').disabled = false; $('sendTop').disabled = false; $('sendState').textContent = '⚠ החלון הזה כבר לא מקושר לאפליקציה — סגור אותו ולחץ שוב 🎤 באפליקציה.'; return; }
       ackedSeq = sendSeq;
+      if (watchTimer) { clearInterval(watchTimer); watchTimer = null; }
       afterSent('✅ האפליקציה קיבלה ' + d.count + ' שדות. אפשר להמשיך ולשלוח שוב, או לסגור את הטאב.');
       return;
     }
